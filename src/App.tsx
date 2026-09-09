@@ -1221,8 +1221,10 @@ export default function App() {
       <div className="panel">
         <header className="chrome">
           <div className="brand">
-            <span className="brand-mark">SUIXIN</span>
-            <small>{APP_NAME}</small>
+            <div className="brand-row">
+              <span className="brand-mark">SUIXIN</span>
+              <small>{APP_NAME}</small>
+            </div>
             {apiStatus !== 'ok' && (
               <span className="api-warn" role="status">
                 {apiStatus === 'missing'
@@ -1326,11 +1328,6 @@ export default function App() {
               >
                 {dailyHit ? '查看今日吉凶' : '今日吉凶'}
               </button>
-              <p className="sub" style={{ marginTop: 6 }}>
-                {dailyHit
-                  ? '今日已起过一卦，点此回看（一天一次）'
-                  : '流日随机取道 · 一天只能起一次'}
-              </p>
               <div className="grid-cats" style={{ marginTop: 14 }}>
                 {DIVINATION_SCHOOLS.map((s) => (
                   <button
@@ -1348,9 +1345,26 @@ export default function App() {
                     }}
                   >
                     <div className="label">{s.label}</div>
-                    <div className="hint">{s.hint}</div>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="cat"
+                  onClick={() => {
+                    const ready = DIVINATION_SCHOOLS.filter((s) => s.ready)
+                    const pick = ready[Math.floor(Math.random() * ready.length)]
+                    if (!pick) return
+                    const methods = methodsForSchool(pick.id)
+                    const m = methods[Math.floor(Math.random() * methods.length)]
+                    setSchool(pick.id)
+                    if (m) setMethod(m)
+                    setDailyMode(false)
+                    setError('')
+                    setPage('topic')
+                  }}
+                >
+                  <div className="label">随机起卦</div>
+                </button>
               </div>
               <button
                 className="btn ghost block"
@@ -1360,9 +1374,6 @@ export default function App() {
                 }}
               >
                 返回开始
-              </button>
-              <button className="btn ghost block" onClick={() => setPage('settings')}>
-                设置
               </button>
             </>
           )}

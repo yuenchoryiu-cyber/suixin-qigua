@@ -168,8 +168,18 @@ select {
     0 0 8px var(--pb-green-glow),
     0 0 18px rgba(57, 255, 20, 0.25);
 }
+
+.brand-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 12px;
+  min-width: 0;
+}
+
 .brand-mark {
-  display: block;
+  display: inline-block;
+  flex-shrink: 0;
   font-family: var(--font-cyber);
   font-weight: 700;
   font-size: 1.15rem;
@@ -183,16 +193,17 @@ select {
   filter: drop-shadow(0 0 10px var(--pb-green-glow));
 }
 .brand small {
-  display: block;
+  display: inline-block;
   font-family: var(--font);
   font-size: var(--fs-caption);
   letter-spacing: 0.12em;
   color: var(--pb-muted);
   font-weight: 500;
-  margin-top: 3px;
+  margin-top: 0;
   line-height: var(--lh-tight);
   text-shadow: none;
   filter: none;
+  white-space: nowrap;
 }
 .api-warn {
   display: block;
