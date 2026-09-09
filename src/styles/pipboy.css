@@ -1814,9 +1814,30 @@ select {
   padding: 8px 12px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   font-size: var(--fs-caption);
   color: var(--pb-muted);
   letter-spacing: 0.08em;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.footer-api {
+  letter-spacing: 0.06em;
+}
+
+.footer-api.connected {
+  color: var(--pb-green);
+}
+
+.footer-api.disconnected {
+  color: var(--pb-amber);
 }
 
 .share-root {

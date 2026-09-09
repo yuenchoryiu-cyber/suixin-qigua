@@ -1153,33 +1153,30 @@ export default function App() {
           interpret.advice
             ? `${dailyMode ? '今日宜' : '该不该做'}：${interpret.advice}`
             : '',
-          interpret.dims
-            ? `综合${formatScoreGrade(interpret.dims.overall)} 爱情${formatScoreGrade(interpret.dims.love)} 事业${formatScoreGrade(interpret.dims.career)} 财运${formatScoreGrade(interpret.dims.wealth)} 身体${formatScoreGrade(interpret.dims.health)}`
-            : '',
+          // 每日一卦评分改画 bar chart，正文不再塞一行文字分
         ]
           .filter(Boolean)
           .join('\n\n'),
       ),
-      followUp: followParts.length ? followParts.join('\n') : undefined,
+      dims:
+        dailyMode && interpret.dims
+          ? (
+              [
+                ['综合', interpret.dims.overall],
+                ['爱情', interpret.dims.love],
+                ['事业', interpret.dims.career],
+                ['财运', interpret.dims.wealth],
+                ['身体', interpret.dims.health],
+              ] as const
+            ).map(([label, value]) => ({
+              label,
+              value,
+              grade: formatScoreGrade(value),
+            }))
+          : undefined,
+      followUp: followParts.length ? followParts.join('\n\n') : undefined,
       disclaimer: scrub(interpret.disclaimer),
     }
-  }
-
-  async function clearApiForShare() {
-    const next = {
-      ...settings,
-      apiKey: '',
-      mode: 'local' as const,
-      apiVerified: false,
-    }
-    setSettings(next)
-    setApiStatus('missing')
-    await persistSettings({ apiKey: '', mode: 'local', apiVerified: false })
-    setError('')
-    setSettingsNote({
-      ok: true,
-      text: '已清除本机 API Key。安装包本身不含 Key；发给别人前请确认设置里 Key 为空。',
-    })
   }
 
   async function refreshSharePreview() {
@@ -1225,9 +1222,7 @@ export default function App() {
         <header className="chrome">
           <div className="brand">
             <span className="brand-mark">SUIXIN</span>
-            <small>
-              {APP_NAME} · v{APP_VERSION}
-            </small>
+            <small>{APP_NAME}</small>
             {apiStatus !== 'ok' && (
               <span className="api-warn" role="status">
                 {apiStatus === 'missing'
@@ -2256,24 +2251,6 @@ export default function App() {
                 <AlertBanner message={error} onDismiss={() => setError('')} />
               )}
 
-              <div className="tip-box">
-                <div className="tip-title">接入说明</div>
-                <p>
-                  兼容 OpenAI Chat Completions：填
-                  <strong> API Key</strong>、<strong> Base URL</strong>、
-                  <strong> 模型名</strong>。Key 只存本机，
-                  <strong>不会写入分享图 / 安装包</strong>。
-                </p>
-                <p>
-                  <strong>未设置 API Key</strong>时：只能选用
-                  <strong>本地起卦解析</strong>；顶栏会红字提示。配置 Key
-                  后可选全 API / 本地起卦+API 解卦。
-                </p>
-                <p>
-                  点一键预设自动填地址与模型，再粘贴该平台 Key；兼容 Ollama 等本地服务（可无 Key）。
-                </p>
-              </div>
-
               <div className="settings-block">
                 <div className="field">
                   <label>一键预设</label>
@@ -2300,8 +2277,8 @@ export default function App() {
                         (p) =>
                           p.baseUrl === settings.baseUrl && p.model === settings.model,
                       )
-                      if (!hit) return '自定义 Base URL / 模型（须 OpenAI 兼容）'
-                      return `${hit.hint} · 请填：${hit.keyFrom}`
+                      if (!hit) return '自定义地址与模型（OpenAI 兼容）'
+                      return hit.keyFrom
                     })()}
                   </p>
                 </div>
@@ -2395,19 +2372,14 @@ export default function App() {
                       void persistSettings({ mode })
                     }}
                   >
-                    <option value="local">本地起卦解析（无需 API）</option>
+                    <option value="local">仅本地</option>
                     {canUseLlm(settings) && (
                       <>
-                        <option value="full-api">全 API（推荐，个人 Key）</option>
-                        <option value="local-plus-api">本地起卦 + API 解卦（省 token）</option>
+                        <option value="full-api">全 API</option>
+                        <option value="local-plus-api">本地起卦 + API 解卦</option>
                       </>
                     )}
                   </select>
-                  {!canUseLlm(settings) && (
-                    <p className="sub" style={{ marginTop: 6 }}>
-                      未设置可用 API：请先选一键预设并粘贴对应 Key（本机 Ollama 可无 Key）。
-                    </p>
-                  )}
                 </div>
                 <div className="field">
                   <label>
@@ -2452,14 +2424,7 @@ export default function App() {
                         : 'local',
                     })
                     setError('')
-                    setSettingsNote({
-                      ok: true,
-                      text: settings.apiVerified
-                        ? '已保存。下次打开无需再测 API。'
-                        : canUseLlm(settings)
-                          ? '已保存。建议点一次「测试 API」。'
-                          : '已保存。',
-                    })
+                    setSettingsNote({ ok: true, text: '已保存' })
                     setPage('home')
                   })()
                 }}
@@ -2486,10 +2451,7 @@ export default function App() {
                     if (r.ok) {
                       await persistSettings({ apiVerified: true })
                       setApiStatus('ok')
-                      setSettingsNote({
-                        ok: true,
-                        text: `${r.detail}（已记住，下次打开不用再测）`,
-                      })
+                      setSettingsNote({ ok: true, text: r.detail })
                     } else {
                       await persistSettings({ apiVerified: false })
                       setApiStatus(canUseLlm(settings) ? 'failed' : 'missing')
@@ -2504,14 +2466,8 @@ export default function App() {
               </button>
               <button
                 className="btn ghost block"
-                onClick={() => void clearApiForShare()}
-              >
-                清除 API Key（发给别人前）
-              </button>
-              <button
-                className="btn ghost block"
                 onClick={() => {
-                  if (!confirm('清空本机历史？API Key 将保留。')) return
+                  if (!confirm('清空本机历史？')) return
                   void (async () => {
                     const d = await window.suixin?.clearStore?.(false)
                     if (d) {
@@ -2528,7 +2484,7 @@ export default function App() {
               <button
                 className="btn ghost block"
                 onClick={() => {
-                  if (!confirm('清空历史并清除 API Key？此操作不可恢复。')) return
+                  if (!confirm('重置设置并清空历史（含 API Key）？不可恢复。')) return
                   void (async () => {
                     const d = await window.suixin?.clearStore?.(true)
                     if (d) {
@@ -2537,20 +2493,11 @@ export default function App() {
                       setApiStatus('missing')
                     }
                     setError('')
-                    setSettingsNote({ ok: true, text: '已清空本机数据与 Key' })
+                    setSettingsNote({ ok: true, text: '已重置' })
                   })()
                 }}
               >
-                清空本机数据（含 Key）
-              </button>
-              <button
-                className="btn ghost block"
-                onClick={() => {
-                  setWelcomeDontShow(false)
-                  setShowWelcome(true)
-                }}
-              >
-                再看一次功能提示
+                重置
               </button>
               <button
                 className="btn ghost block"
@@ -2567,7 +2514,25 @@ export default function App() {
         </main>
 
         <footer className="footer-bar">
-          <span>STATUS: {busy ? 'BUSY' : 'IDLE'}</span>
+          <div className="footer-left">
+            <span>STATUS: {busy ? 'BUSY' : 'IDLE'}</span>
+            <span
+              className={
+                apiStatus === 'ok' ? 'footer-api connected' : 'footer-api disconnected'
+              }
+              title={
+                apiStatus === 'ok'
+                  ? 'API 已连通（解读模式选「本地」时仍只跑本地）'
+                  : apiStatus === 'untested'
+                    ? '已配置但未测试'
+                    : apiStatus === 'failed'
+                      ? '连通失败'
+                      : '未配置 API'
+              }
+            >
+              API: {apiStatus === 'ok' ? 'CONNECTED' : 'DISCONNECTED'}
+            </span>
+          </div>
           <span>V{APP_VERSION}</span>
         </footer>
       </div>
@@ -2591,13 +2556,9 @@ export default function App() {
             <div className="tip-box">
               <div className="tip-title">如何接入 API</div>
               <ol className="tip-list">
-                <li>打开「设置」，点预设（DeepSeek / 豆包 / Claude / OpenAI 等）</li>
-                <li>粘贴 API Key；未配置时仅本地起卦解析，顶栏会红字提示</li>
-                <li>无 Key 时仍可起卦，并用离线简解</li>
+                <li>设置里点一键预设，粘贴对应平台 Key</li>
+                <li>无 Key 也可本地起卦</li>
               </ol>
-              <p className="sub" style={{ marginBottom: 0 }}>
-                兼容主流 OpenAI 格式；Key 仅存本机。
-              </p>
             </div>
 
             <label className="welcome-check">
