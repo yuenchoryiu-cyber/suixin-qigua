@@ -73,8 +73,9 @@ function seedLines(cast: CastResult): string {
 }
 
 function parseInterpret(content: string): InterpretResult {
+  const raw = extractJsonObject(content) || content
   try {
-    const parsed = JSON.parse(content) as InterpretResult & {
+    const parsed = JSON.parse(raw) as InterpretResult & {
       score?: number
       followUps?: string[]
       follow_ups?: string[]
@@ -123,6 +124,19 @@ function parseInterpret(content: string): InterpretResult {
       disclaimer: DISCLAIMER,
     }
   }
+}
+
+/** 从模型回复中抽出 JSON（容忍 ```json 围栏与前后废话） */
+function extractJsonObject(text: string): string | null {
+  const t = String(text || '').trim()
+  if (!t) return null
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fence?.[1] || t).trim()
+  if (candidate.startsWith('{') && candidate.endsWith('}')) return candidate
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start >= 0 && end > start) return candidate.slice(start, end + 1)
+  return null
 }
 
 function parseDimHints(raw: unknown): InterpretResult['dimHints'] {
@@ -420,46 +434,80 @@ async function callLlmText(
   if (settings.apiKey?.trim()) {
     headers.Authorization = `Bearer ${settings.apiKey.trim()}`
   }
-
-  const body: Record<string, unknown> = {
-    model: settings.model,
-    temperature: 0.75,
-    messages,
-  }
-  if (json) body.response_format = { type: 'json_object' }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`API 调用失败 (${res.status})：${text.slice(0, 200) || res.statusText}`)
+  // OpenRouter 建议附带；对其它厂商无害
+  if (/openrouter\.ai/i.test(url)) {
+    headers['HTTP-Referer'] = 'https://github.com/yuenchoryiu-cyber/suixin-qigua'
+    headers['X-Title'] = '随心起卦'
   }
 
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[]
+  const post = async (useJsonFormat: boolean) => {
+    const body: Record<string, unknown> = {
+      model: settings.model.trim(),
+      temperature: 0.75,
+      messages,
+    }
+    if (useJsonFormat) body.response_format = { type: 'json_object' }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      const hint =
+        res.status === 401 || res.status === 403
+          ? '（请确认 Key 属于当前预设平台，且未过期）'
+          : res.status === 404
+            ? '（请检查 Base URL / 模型名是否与该平台一致）'
+            : ''
+      throw new Error(
+        `API 调用失败 (${res.status})${hint}：${text.slice(0, 220) || res.statusText}`,
+      )
+    }
+
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[]
+    }
+    const content = data.choices?.[0]?.message?.content
+    if (!content) throw new Error('模型未返回内容')
+    return content
   }
-  const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error('模型未返回内容')
-  return content
+
+  try {
+    return await post(json)
+  } catch (e) {
+    // 不少厂商不支持 response_format；解卦时自动降级再试一次
+    if (json) {
+      try {
+        return await post(false)
+      } catch {
+        throw e
+      }
+    }
+    throw e
+  }
 }
 
-/** 仅当配置了 API Key 时走云端；未配置则只用本地起卦解析 */
+/** 仅当配置了可用的远程入口时走云端（有 Key，或本机无 Key 的兼容接口如 Ollama） */
 export function canUseLlm(settings: AppSettings): boolean {
-  return !!settings.apiKey?.trim()
+  if (settings.apiKey?.trim()) return true
+  const b = (settings.baseUrl || '').toLowerCase()
+  return /127\.0\.0\.1|localhost/.test(b)
 }
 
-/** OpenAI 兼容：多数为 /v1/chat/completions；智谱 v4 / 豆包 v3 为 /chat/completions */
+/**
+ * OpenAI 兼容 Chat Completions URL。
+ * 已含 /chat/completions → 原样；…/v1|/v3|/v4 → 补 /chat/completions；否则补 /v1/chat/completions。
+ */
 export function chatCompletionsUrl(baseUrl: string): string {
   const b = baseUrl.trim().replace(/\/$/, '')
   if (!b) return 'https://api.deepseek.com/v1/chat/completions'
   if (/\/chat\/completions$/i.test(b)) return b
-  if (/\/v4$/i.test(b)) return `${b}/chat/completions`
-  if (/\/v3$/i.test(b)) return `${b}/chat/completions`
-  if (/\/v1$/i.test(b)) return `${b}/chat/completions`
+  if (/\/v[134]$/i.test(b)) return `${b}/chat/completions`
+  if (/\/compatible-mode$/i.test(b)) return `${b}/v1/chat/completions`
+  if (/\/openai$/i.test(b)) return `${b}/v1/chat/completions`
   return `${b}/v1/chat/completions`
 }
 
@@ -592,9 +640,16 @@ export async function testApiConnection(
   settings: AppSettings,
 ): Promise<{ ok: boolean; detail: string }> {
   if (!canUseLlm(settings)) {
-    return { ok: false, detail: '未配置 Key，且 Base URL 也不是本机模型。可先用离线简解。' }
+    return {
+      ok: false,
+      detail: '请先点一键预设，再粘贴对应平台的 API Key（本机 Ollama 可选「自定义」且 Key 可留空）。',
+    }
+  }
+  if (!settings.model?.trim()) {
+    return { ok: false, detail: '模型名为空。请重新点一键预设，或手动填写模型名。' }
   }
   try {
+    const endpoint = chatCompletionsUrl(settings.baseUrl)
     const text = await callLlmText(
       settings,
       [
@@ -603,7 +658,10 @@ export async function testApiConnection(
       ],
       false,
     )
-    return { ok: true, detail: `连通成功（${settings.model}）：${text.slice(0, 40)}` }
+    return {
+      ok: true,
+      detail: `连通成功 · ${settings.model} · ${endpoint.replace(/^https?:\/\//, '').slice(0, 48)}… 回复：${text.slice(0, 24)}`,
+    }
   } catch (e) {
     return {
       ok: false,

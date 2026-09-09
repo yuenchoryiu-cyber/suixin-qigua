@@ -2270,7 +2270,7 @@ export default function App() {
                   后可选全 API / 本地起卦+API 解卦。
                 </p>
                 <p>
-                  预设含 DeepSeek、豆包、Claude（OpenRouter）、OpenAI、Kimi、通义、智谱等。
+                  点一键预设自动填地址与模型，再粘贴该平台 Key；兼容 Ollama 等本地服务（可无 Key）。
                 </p>
               </div>
 
@@ -2287,7 +2287,7 @@ export default function App() {
                             ? 'active'
                             : ''
                         }`}
-                        title={p.hint}
+                        title={`${p.hint} · 需：${p.keyFrom}`}
                         onClick={() => applyApiPreset(p.id)}
                       >
                         {p.label}
@@ -2295,10 +2295,14 @@ export default function App() {
                     ))}
                   </div>
                   <p className="sub" style={{ marginTop: 6 }}>
-                    {API_PRESETS.find(
-                      (p) =>
-                        p.baseUrl === settings.baseUrl && p.model === settings.model,
-                    )?.hint || '自定义 Base URL / 模型'}
+                    {(() => {
+                      const hit = API_PRESETS.find(
+                        (p) =>
+                          p.baseUrl === settings.baseUrl && p.model === settings.model,
+                      )
+                      if (!hit) return '自定义 Base URL / 模型（须 OpenAI 兼容）'
+                      return `${hit.hint} · 请填：${hit.keyFrom}`
+                    })()}
                   </p>
                 </div>
                 <div className="field">
@@ -2392,42 +2396,29 @@ export default function App() {
                     }}
                   >
                     <option value="local">本地起卦解析（无需 API）</option>
-                    {!!settings.apiKey?.trim() && (
+                    {canUseLlm(settings) && (
                       <>
                         <option value="full-api">全 API（推荐，个人 Key）</option>
                         <option value="local-plus-api">本地起卦 + API 解卦（省 token）</option>
                       </>
                     )}
                   </select>
-                  {!settings.apiKey?.trim() && (
+                  {!canUseLlm(settings) && (
                     <p className="sub" style={{ marginTop: 6 }}>
-                      未设置 API Key，仅能使用本地起卦解析。
+                      未设置可用 API：请先选一键预设并粘贴对应 Key（本机 Ollama 可无 Key）。
                     </p>
                   )}
-                </div>
-                <div className="field">
-                  <label>冷却分钟（可调）</label>
-                  <input
-                    type="number"
-                    min={15}
-                    max={1440}
-                    value={settings.cooldownMinutes}
-                    onChange={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        cooldownMinutes: Number(e.target.value) || 120,
-                      }))
-                    }
-                  />
                 </div>
                 <div className="field">
                   <label>
                     <input
                       type="checkbox"
                       checked={settings.alwaysOnTop}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, alwaysOnTop: e.target.checked }))
-                      }
+                      onChange={(e) => {
+                        const alwaysOnTop = e.target.checked
+                        setSettings((s) => ({ ...s, alwaysOnTop }))
+                        void persistSettings({ alwaysOnTop })
+                      }}
                     />{' '}
                     面板置顶
                   </label>
@@ -2436,94 +2427,15 @@ export default function App() {
                   <label>
                     <input
                       type="checkbox"
-                      checked={settings.highPrecisionDefault}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          highPrecisionDefault: e.target.checked,
-                        }))
-                      }
-                    />{' '}
-                    默认开启高精度追问
-                  </label>
-                </div>
-                <div className="field">
-                  <label>
-                    <input
-                      type="checkbox"
                       checked={settings.hideWelcomeTip}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          hideWelcomeTip: e.target.checked,
-                        }))
-                      }
+                      onChange={(e) => {
+                        const hideWelcomeTip = e.target.checked
+                        setSettings((s) => ({ ...s, hideWelcomeTip }))
+                        void persistSettings({ hideWelcomeTip })
+                      }}
                     />{' '}
                     下次启动不再显示首次提示
                   </label>
-                </div>
-                <div className="field">
-                  <label>字号</label>
-                  <div className="row">
-                    {(
-                      [
-                        ['sm', '小'],
-                        ['md', '中'],
-                        ['lg', '大'],
-                      ] as const
-                    ).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`chip ${(settings.fontScale || 'md') === id ? 'active' : ''}`}
-                        onClick={() => setSettings((s) => ({ ...s, fontScale: id }))}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={!!settings.highContrast}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, highContrast: e.target.checked }))
-                      }
-                    />{' '}
-                    高对比显示
-                  </label>
-                </div>
-                <div className="field">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={settings.storeQuestions !== false}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, storeQuestions: e.target.checked }))
-                      }
-                    />{' '}
-                    历史中保存问句
-                  </label>
-                </div>
-                <div className="field">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={!!settings.castReplayMode}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          castReplayMode: e.target.checked,
-                        }))
-                      }
-                    />{' '}
-                    复现模式（同输入同卦，跳过按压）
-                  </label>
-                  <p className="sub" style={{ marginTop: 6 }}>
-                    默认关闭。开启后便于对照练习。
-                  </p>
                 </div>
               </div>
 
@@ -2533,7 +2445,7 @@ export default function App() {
                   void (async () => {
                     await persistSettings({
                       ...settings,
-                      mode: settings.apiKey?.trim()
+                      mode: canUseLlm(settings)
                         ? settings.mode === 'local'
                           ? 'full-api'
                           : settings.mode
@@ -2544,7 +2456,7 @@ export default function App() {
                       ok: true,
                       text: settings.apiVerified
                         ? '已保存。下次打开无需再测 API。'
-                        : settings.apiKey?.trim()
+                        : canUseLlm(settings)
                           ? '已保存。建议点一次「测试 API」。'
                           : '已保存。',
                     })
@@ -2564,7 +2476,7 @@ export default function App() {
                     setSettingsNote(null)
                     await persistSettings({
                       ...settings,
-                      mode: settings.apiKey?.trim()
+                      mode: canUseLlm(settings)
                         ? settings.mode === 'local'
                           ? 'full-api'
                           : settings.mode
@@ -2580,7 +2492,7 @@ export default function App() {
                       })
                     } else {
                       await persistSettings({ apiVerified: false })
-                      setApiStatus(settings.apiKey?.trim() ? 'failed' : 'missing')
+                      setApiStatus(canUseLlm(settings) ? 'failed' : 'missing')
                       setSettingsNote({ ok: false, text: r.detail })
                       void window.suixin?.logError?.(`api-test: ${r.detail}`)
                     }
@@ -2595,47 +2507,6 @@ export default function App() {
                 onClick={() => void clearApiForShare()}
               >
                 清除 API Key（发给别人前）
-              </button>
-              <button
-                className="btn ghost block"
-                onClick={() => {
-                  void (async () => {
-                    const r = await window.suixin?.exportConfig?.()
-                    setError('')
-                    setSettingsNote({
-                      ok: !!r?.ok,
-                      text: r?.ok
-                        ? `已导出（不含 Key）${r.path ? `：${r.path}` : ''}`
-                        : '已取消导出',
-                    })
-                  })()
-                }}
-              >
-                导出配置（脱敏）
-              </button>
-              <button
-                className="btn ghost block"
-                onClick={() => {
-                  void (async () => {
-                    const r = await window.suixin?.importConfig?.()
-                    setError('')
-                    if (r?.ok && r.settings) {
-                      setSettings(r.settings)
-                      setApiStatus(r.settings.apiKey?.trim() ? 'untested' : 'missing')
-                      setSettingsNote({
-                        ok: true,
-                        text: '已导入配置（未改动本机 Key）',
-                      })
-                    } else {
-                      setSettingsNote({
-                        ok: false,
-                        text: r?.error || '已取消导入',
-                      })
-                    }
-                  })()
-                }}
-              >
-                导入配置
               </button>
               <button
                 className="btn ghost block"

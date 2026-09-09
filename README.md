@@ -58,7 +58,7 @@ npm run dev
 |------|------------|
 | Git 仓库源码 / `.gitignore` 忽略项 | **否**（Key 不在项目目录） |
 | 安装包 / CI Release 产物 | **否**（只打包 `dist` + `dist-electron`） |
-| 分享 PNG / 导出配置 JSON | **否**（导出强制 `apiKey: ""`） |
+| 分享 PNG | **否**（文案经脱敏） |
 | 本机 `%AppData%...\suixin-store.json` | **是**（仅本机；勿把该文件拷进仓库或发给别人） |
 
 发给别人前：设置 →「清除 API Key」。错误日志会脱敏常见 Key 形态，但仍勿分享 `%AppData%` 目录。

@@ -1,6 +1,6 @@
 {
   "name": "suixin-qigua",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "随心起卦 — Pip-Boy 风格桌面起卦",
   "author": "suixin-qigua",
   "main": "dist-electron/main.js",
@@ -28,15 +28,15 @@
     ],
     "asar": true,
     "forceCodeSigning": false,
-    "extraFiles": [
-      {
-        "from": "build/launch-silent.vbs",
-        "to": "启动随心起卦.vbs"
-      }
-    ],
     "win": {
       "signAndEditExecutable": false,
       "forceCodeSigning": false,
+      "extraFiles": [
+        {
+          "from": "build/launch-silent.vbs",
+          "to": "启动随心起卦.vbs"
+        }
+      ],
       "target": [
         {
           "target": "nsis",

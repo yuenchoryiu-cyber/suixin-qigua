@@ -40,7 +40,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/make-icon.mjs
-      - run: npm run dist:mac
+      - name: Build macOS installers
+        run: npm run dist:mac
+        env:
+          # Unsigned shareable builds (no Apple Developer cert in CI)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
           name: suixin-qigua-macos

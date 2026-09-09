@@ -294,53 +294,6 @@ function registerIpc() {
     return data
   })
 
-  ipcMain.handle('config:export', async () => {
-    const { apiKey: _omit, ...rest } = data.settings
-    const payload = {
-      ...rest,
-      apiKey: '',
-      exportedAt: new Date().toISOString(),
-      note: '此文件不含 API Key；导入时不会覆盖本机 Key。',
-    }
-    const result = await dialog.showSaveDialog({
-      title: '导出配置（不含 API Key）',
-      defaultPath: `suixin-settings-${Date.now()}.json`,
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    })
-    if (result.canceled || !result.filePath) return { ok: false as const }
-    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2), 'utf8')
-    return { ok: true as const, path: result.filePath }
-  })
-
-  ipcMain.handle('config:import', async () => {
-    const result = await dialog.showOpenDialog({
-      title: '导入配置',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-      properties: ['openFile'],
-    })
-    if (result.canceled || !result.filePaths[0]) return { ok: false as const }
-    try {
-      const raw = fs.readFileSync(result.filePaths[0], 'utf8')
-      const parsed = JSON.parse(raw) as Partial<AppSettings>
-      const { apiKey: _ignore, ...safe } = parsed
-      const merged: AppSettings = {
-        ...data.settings,
-        ...safe,
-        apiKey: data.settings.apiKey,
-      }
-      data = { ...data, settings: merged }
-      saveStore(data)
-      if (mainWindow) {
-        mainWindow.setAlwaysOnTop(merged.alwaysOnTop)
-      }
-      return { ok: true as const, settings: merged }
-    } catch (e) {
-      return {
-        ok: false as const,
-        error: e instanceof Error ? e.message : String(e),
-      }
-    }
-  })
 }
 
 const gotLock = app.requestSingleInstanceLock()

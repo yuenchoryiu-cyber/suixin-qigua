@@ -34,76 +34,95 @@ export interface AppSettings {
   apiVerified?: boolean
 }
 
-/** OpenAI 兼容接口预设（填 Base URL + 模型名即可） */
+/** OpenAI 兼容接口预设：点选后自动填 Base URL + 模型名，用户只需贴对应平台的 API Key */
 export const API_PRESETS: {
   id: string
   label: string
   baseUrl: string
   model: string
   hint: string
+  /** 告诉用户该贴哪家的 Key */
+  keyFrom: string
 }[] = [
   {
     id: 'deepseek',
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-chat',
-    hint: '默认推荐',
+    hint: '默认推荐 · 模型已自动填好',
+    keyFrom: 'DeepSeek 控制台的 API Key',
   },
   {
     id: 'doubao',
     label: '豆包',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    model: 'doubao-1-5-pro-32k-250115',
-    hint: '火山方舟；模型可改成控制台的 ep- 接入点 ID',
+    model: 'ep-xxxxxxxx',
+    hint: '火山方舟：模型名请改成控制台的接入点 ID（ep- 开头）',
+    keyFrom: '火山方舟 API Key',
   },
   {
     id: 'claude',
     label: 'Claude',
     baseUrl: 'https://openrouter.ai/api/v1',
     model: 'anthropic/claude-sonnet-4',
-    hint: '经 OpenRouter 的 OpenAI 兼容（需 OpenRouter Key）',
+    hint: '经 OpenRouter（OpenAI 兼容）；也可用其他 OpenRouter 模型名',
+    keyFrom: 'OpenRouter API Key（不是 Anthropic 官网 Key）',
   },
   {
     id: 'openai',
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com',
     model: 'gpt-4o-mini',
-    hint: '官方 Chat Completions',
+    hint: '官方 Chat Completions · 模型已自动填好',
+    keyFrom: 'OpenAI API Key（sk-…）',
   },
   {
     id: 'moonshot',
     label: 'Kimi',
     baseUrl: 'https://api.moonshot.cn',
     model: 'moonshot-v1-8k',
-    hint: '月之暗面',
+    hint: '月之暗面 · 模型已自动填好',
+    keyFrom: 'Moonshot / Kimi API Key',
   },
   {
     id: 'qwen',
     label: '通义千问',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode',
     model: 'qwen-plus',
-    hint: '阿里云兼容模式',
+    hint: '阿里云兼容模式 · 模型已自动填好',
+    keyFrom: '阿里云 DashScope API Key',
   },
   {
     id: 'zhipu',
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash',
-    hint: 'BigModel OpenAI 兼容',
+    hint: 'BigModel OpenAI 兼容 · 模型已自动填好',
+    keyFrom: '智谱 BigModel API Key',
   },
   {
     id: 'siliconflow',
     label: 'SiliconFlow',
     baseUrl: 'https://api.siliconflow.cn',
     model: 'deepseek-ai/DeepSeek-V3',
-    hint: '聚合多家模型',
+    hint: '聚合多家 · 可改模型名为平台上的任意模型',
+    keyFrom: 'SiliconFlow API Key',
   },
   {
     id: 'groq',
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai',
     model: 'llama-3.3-70b-versatile',
-    hint: '高速推理',
+    hint: '高速推理 · 模型已自动填好',
+    keyFrom: 'Groq API Key',
+  },
+  {
+    id: 'custom',
+    label: '自定义',
+    baseUrl: 'http://127.0.0.1:11434',
+    model: 'llama3.2',
+    hint: '任意 OpenAI 兼容接口（如 Ollama / OneAPI / 中转站）；自行改 URL 与模型名',
+    keyFrom: '该服务的 Key（本机 Ollama 可留空试连通）',
   },
 ]
 

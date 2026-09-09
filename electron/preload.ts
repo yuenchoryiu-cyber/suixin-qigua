@@ -19,13 +19,6 @@ const api = {
     resetSettings?: boolean,
   ): Promise<{ settings: AppSettings; history: HistoryEntry[] }> =>
     ipcRenderer.invoke('store:clear', !!resetSettings),
-  exportConfig: (): Promise<{ ok: boolean; path?: string }> =>
-    ipcRenderer.invoke('config:export'),
-  importConfig: (): Promise<{
-    ok: boolean
-    settings?: AppSettings
-    error?: string
-  }> => ipcRenderer.invoke('config:import'),
   onNavigate: (cb: (page: string) => void) => {
     const listener = (_: unknown, page: string) => cb(page)
     ipcRenderer.on('navigate', listener)
