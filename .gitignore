@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-electron
+release
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+*.local
+Thumbs.db
+
+# 本机密钥与导出配置，禁止进仓库
+suixin-store.json
+**/suixin-store.json
+suixin-settings*.json
+**/suixin-settings*.json
+suixin-error.log
+**/suixin-error.log
+
+# 本地调试输出
+electron-err.txt
+electron-out.txt
+tsc-out.txt
+
+# Cursor 本地缓存（保留项目技能时可按需取消注释下一行）
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
