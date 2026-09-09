@@ -25,14 +25,22 @@ Mac 未签名，首次打开可在「隐私与安全性」允许。
 
 ![开始页](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/01-start.png)
 
+**占卜体系**
+
+![占卜体系](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/02-schools.png)
+
+**取数方式**
+
+![取数方式](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/03-methods.png)
+
 **算卦过程**
 
-![算卦过程](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/02-process.png)
+![算卦过程](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/04-process.png)
 
 **算卦结果**
 
-![算卦结果](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/03-result.png)
+![算卦结果](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/05-result.png)
 
 **生成分享**
 
-![生成分享](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/04-share.png)
+![生成分享](https://raw.githubusercontent.com/yuenchoryiu-cyber/suixin-qigua/master/docs/screenshots/06-share.png)
