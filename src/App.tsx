@@ -129,6 +129,7 @@ const defaultSettings: AppSettings = {
   highContrast: false,
   storeQuestions: true,
   castReplayMode: false,
+  apiVerified: false,
 }
 
 export default function App() {
@@ -250,9 +251,11 @@ export default function App() {
       if (!window.suixin) return
       const s = await window.suixin.getSettings()
       const hasKey = !!s.apiKey?.trim()
-      const next = hasKey ? s : { ...s, mode: 'local' as const }
+      const next = hasKey ? s : { ...s, mode: 'local' as const, apiVerified: false }
       setSettings(next)
-      setApiStatus(hasKey ? 'untested' : 'missing')
+      setApiStatus(
+        !hasKey ? 'missing' : s.apiVerified ? 'ok' : 'untested',
+      )
       setHistory(await window.suixin.listHistory())
       setHighPrecision(!!s.highPrecisionDefault && hasKey)
       if (!s.hideWelcomeTip) setShowWelcome(true)
@@ -358,6 +361,23 @@ export default function App() {
     setSettings(next)
   }
 
+  /** 改 Key / URL / 模型后作废「已验证」 */
+  function invalidateApiVerified(
+    next: Partial<AppSettings>,
+    prev: AppSettings = settings,
+  ): Partial<AppSettings> {
+    const keyChanged =
+      next.apiKey !== undefined && next.apiKey.trim() !== (prev.apiKey || '').trim()
+    const urlChanged =
+      next.baseUrl !== undefined && next.baseUrl.trim() !== (prev.baseUrl || '').trim()
+    const modelChanged =
+      next.model !== undefined && next.model.trim() !== (prev.model || '').trim()
+    if (keyChanged || urlChanged || modelChanged) {
+      return { ...next, apiVerified: false }
+    }
+    return next
+  }
+
   async function dismissWelcome(goSettings: boolean) {
     if (welcomeDontShow) {
       await persistSettings({ hideWelcomeTip: true })
@@ -369,7 +389,18 @@ export default function App() {
   function applyApiPreset(id: string) {
     const p = API_PRESETS.find((x) => x.id === id)
     if (!p) return
-    setSettings((s) => ({ ...s, baseUrl: p.baseUrl, model: p.model }))
+    setSettings((s) => ({
+      ...s,
+      baseUrl: p.baseUrl,
+      model: p.model,
+      apiVerified: false,
+    }))
+    setApiStatus((prev) => (prev === 'missing' ? 'missing' : 'untested'))
+    void persistSettings({
+      baseUrl: p.baseUrl,
+      model: p.model,
+      apiVerified: false,
+    })
   }
 
   function beginFreshAsk(nextCategory?: CategoryId) {
@@ -1139,10 +1170,11 @@ export default function App() {
       ...settings,
       apiKey: '',
       mode: 'local' as const,
+      apiVerified: false,
     }
     setSettings(next)
     setApiStatus('missing')
-    await persistSettings({ apiKey: '', mode: 'local' })
+    await persistSettings({ apiKey: '', mode: 'local', apiVerified: false })
     setError('')
     setSettingsNote({
       ok: true,
@@ -2279,20 +2311,28 @@ export default function App() {
                       setSettings((s) => ({
                         ...s,
                         apiKey,
-                        mode: apiKey.trim() ? s.mode === 'local' ? 'full-api' : s.mode : 'local',
+                        apiVerified: false,
+                        mode: apiKey.trim()
+                          ? s.mode === 'local'
+                            ? 'full-api'
+                            : s.mode
+                          : 'local',
                       }))
                       setApiStatus(apiKey.trim() ? 'untested' : 'missing')
                     }}
                     onBlur={(e) => {
                       const apiKey = e.target.value
-                      void persistSettings({
-                        apiKey,
-                        mode: apiKey.trim()
-                          ? settings.mode === 'local'
-                            ? 'full-api'
-                            : settings.mode
-                          : 'local',
-                      })
+                      void persistSettings(
+                        invalidateApiVerified({
+                          apiKey,
+                          mode: apiKey.trim()
+                            ? settings.mode === 'local'
+                              ? 'full-api'
+                              : settings.mode
+                            : 'local',
+                          apiVerified: false,
+                        }),
+                      )
                     }}
                     placeholder="sk-..."
                   />
@@ -2301,8 +2341,21 @@ export default function App() {
                   <label>Base URL</label>
                   <input
                     value={settings.baseUrl}
-                    onChange={(e) => setSettings((s) => ({ ...s, baseUrl: e.target.value }))}
-                    onBlur={(e) => void persistSettings({ baseUrl: e.target.value })}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        baseUrl: e.target.value,
+                        apiVerified: false,
+                      }))
+                    }
+                    onBlur={(e) =>
+                      void persistSettings(
+                        invalidateApiVerified({
+                          baseUrl: e.target.value,
+                          apiVerified: false,
+                        }),
+                      )
+                    }
                     placeholder="https://api.deepseek.com"
                   />
                 </div>
@@ -2310,8 +2363,21 @@ export default function App() {
                   <label>模型名</label>
                   <input
                     value={settings.model}
-                    onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}
-                    onBlur={(e) => void persistSettings({ model: e.target.value })}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        model: e.target.value,
+                        apiVerified: false,
+                      }))
+                    }
+                    onBlur={(e) =>
+                      void persistSettings(
+                        invalidateApiVerified({
+                          model: e.target.value,
+                          apiVerified: false,
+                        }),
+                      )
+                    }
                     placeholder="deepseek-chat"
                   />
                 </div>
@@ -2319,12 +2385,11 @@ export default function App() {
                   <label>解读模式</label>
                   <select
                     value={settings.mode}
-                    onChange={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        mode: e.target.value as AppSettings['mode'],
-                      }))
-                    }
+                    onChange={(e) => {
+                      const mode = e.target.value as AppSettings['mode']
+                      setSettings((s) => ({ ...s, mode }))
+                      void persistSettings({ mode })
+                    }}
                   >
                     <option value="local">本地起卦解析（无需 API）</option>
                     {!!settings.apiKey?.trim() && (
@@ -2465,10 +2530,26 @@ export default function App() {
               <button
                 className="btn block"
                 onClick={() => {
-                  void persistSettings(settings)
-                  setError('')
-                  setSettingsNote(null)
-                  setPage('home')
+                  void (async () => {
+                    await persistSettings({
+                      ...settings,
+                      mode: settings.apiKey?.trim()
+                        ? settings.mode === 'local'
+                          ? 'full-api'
+                          : settings.mode
+                        : 'local',
+                    })
+                    setError('')
+                    setSettingsNote({
+                      ok: true,
+                      text: settings.apiVerified
+                        ? '已保存。下次打开无需再测 API。'
+                        : settings.apiKey?.trim()
+                          ? '已保存。建议点一次「测试 API」。'
+                          : '已保存。',
+                    })
+                    setPage('home')
+                  })()
                 }}
               >
                 保存
@@ -2481,11 +2562,28 @@ export default function App() {
                     setBusy(true)
                     setError('')
                     setSettingsNote(null)
-                    await persistSettings(settings)
+                    await persistSettings({
+                      ...settings,
+                      mode: settings.apiKey?.trim()
+                        ? settings.mode === 'local'
+                          ? 'full-api'
+                          : settings.mode
+                        : 'local',
+                    })
                     const r = await testApiConnection(settings)
-                    setSettingsNote({ ok: r.ok, text: r.detail })
-                    setApiStatus(r.ok ? 'ok' : settings.apiKey?.trim() ? 'failed' : 'missing')
-                    if (!r.ok) void window.suixin?.logError?.(`api-test: ${r.detail}`)
+                    if (r.ok) {
+                      await persistSettings({ apiVerified: true })
+                      setApiStatus('ok')
+                      setSettingsNote({
+                        ok: true,
+                        text: `${r.detail}（已记住，下次打开不用再测）`,
+                      })
+                    } else {
+                      await persistSettings({ apiVerified: false })
+                      setApiStatus(settings.apiKey?.trim() ? 'failed' : 'missing')
+                      setSettingsNote({ ok: false, text: r.detail })
+                      void window.suixin?.logError?.(`api-test: ${r.detail}`)
+                    }
                     setBusy(false)
                   })()
                 }}

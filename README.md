@@ -4,15 +4,15 @@ Pip-Boy 风格桌面起卦。多种取数方式 + 个人 LLM API 解读（也可
 
 ## 给朋友：从 GitHub 下载 Win / Mac
 
-1. 打开仓库 **Releases** 页，选最新版本（如 `v2.2.0`）。
+1. 打开仓库 **Releases** 页，选最新版本（如 `v2.2.1`）。
 2. Windows：下载 `随心起卦-*-win-*.exe`（安装版）或 `*-win-portable.exe`（免安装）。
 3. macOS：下载 `随心起卦-*-mac-*.dmg`（或 `.zip`）。未签名时首次打开需在「系统设置 → 隐私与安全性」允许。
 
 **维护者如何发布一次：**
 
 ```bash
-git tag v2.2.0
-git push origin v2.2.0
+git tag v2.2.1
+git push origin v2.2.1
 ```
 
 推送 `v*` tag 后，GitHub Actions 会打 Win + Mac 包，并自动挂到该 tag 的 Release。也可在 Actions 里手动 `workflow_dispatch` 只生成 Artifacts（不挂 Release）。

@@ -30,6 +30,8 @@ export interface AppSettings {
    * 默认 false = 开启环境变数。
    */
   castReplayMode?: boolean
+  /** 最近一次「测试 API」已通过；重启后不再强迫重测（改 Key/URL/模型会清掉） */
+  apiVerified?: boolean
 }
 
 /** OpenAI 兼容接口预设（填 Base URL + 模型名即可） */

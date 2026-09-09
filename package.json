@@ -1,6 +1,6 @@
 {
   "name": "suixin-qigua",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "随心起卦 — Pip-Boy 风格桌面起卦",
   "author": "suixin-qigua",
   "main": "dist-electron/main.js",
@@ -10,9 +10,9 @@
     "build": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "dist": "npm run dist:win",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:all": "npm run build && electron-builder --win --mac"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:all": "npm run build && electron-builder --win --mac --publish never"
   },
   "build": {
     "appId": "com.suixin.qigua",

@@ -22,6 +22,7 @@ export const defaultSettings: AppSettings = {
   highContrast: false,
   storeQuestions: true,
   castReplayMode: false,
+  apiVerified: false,
 }
 
 const defaults: PersistData = {

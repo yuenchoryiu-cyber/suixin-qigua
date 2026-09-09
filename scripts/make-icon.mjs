@@ -1,4 +1,4 @@
-// 生成简易安装图标（绿十字，256×256 PNG）
+// 生成简易安装图标（绿十字，512×512 PNG；macOS 要求至少 512）
 // 用法: node scripts/make-icon.mjs
 
 import fs from 'node:fs'
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const outDir = path.join(__dirname, '..', 'build')
-const size = 256
+const size = 512
 
 function crc32(buf) {
   let c = ~0
