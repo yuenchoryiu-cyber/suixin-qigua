@@ -55,5 +55,5 @@ export function pickRandomYijingQuote(
 }
 
 /** 与 package.json version 同步展示用 */
-export const APP_VERSION = '2.1.0'
+export const APP_VERSION = '2.2.0'
 export const APP_NAME = '随心起卦'

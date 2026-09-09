@@ -1,5 +1,5 @@
 import type { CastInput, CastResult, CastSeed } from '../shared/types'
-import { castByMethod } from '../meihua/cast'
+import { castByMethod, entropySeedInt } from '../meihua/cast'
 import { buildFingerprint } from '../meihua/fingerprint'
 import { castLiuyao, type LiuyaoPan } from '../liuyao/pan'
 import { buildQimenPan, type QimenPan } from '../qimen/pan'
@@ -9,6 +9,10 @@ export type CastExtras = Parameters<typeof castByMethod>[1]
 
 function toSeedInt(n: number): number {
   return Math.max(1, Math.round(Math.abs(n) * 100))
+}
+
+function withEntropySeed(base: number, extras: CastExtras): number {
+  return base + entropySeedInt(extras.entropy)
 }
 
 export async function castUnified(options: {
@@ -34,36 +38,45 @@ function castLiuyaoUnified(input: CastInput, extras: CastExtras): CastResult {
   let pan: LiuyaoPan
   let seed: CastSeed | undefined
   let hintPrefix = ''
+  const holdMs = extras.entropy?.holdMs
+  const momentE = extras.entropy?.enabled ? entropySeedInt(extras.entropy) : undefined
 
   if (input.method === 'number') {
-    pan = castLiuyao('coin')
+    const s = withEntropySeed(Date.now() % 1000003, extras)
+    pan = castLiuyao('seed', new Date(), s)
+    seed = { momentE, holdMs }
     hintPrefix = '铜钱六爻'
   } else if (input.method === 'random') {
     const n = extras.numbers
-    const s = n
-      ? Math.floor(n[0]) * 1000003 + Math.floor(n[1]) * 1009 + Math.floor(n[2])
-      : Date.now()
+    const s = withEntropySeed(
+      n
+        ? Math.floor(n[0]) * 1000003 + Math.floor(n[1]) * 1009 + Math.floor(n[2])
+        : Date.now(),
+      extras,
+    )
     pan = castLiuyao('seed', new Date(), s)
-    seed = n ? { numbers: [n[0], n[1], n[2]] } : undefined
-    hintPrefix = n ? `随机六爻 · ${n.join('/')}` : '随机六爻'
+    seed = n ? { numbers: [n[0], n[1], n[2]], momentE, holdMs } : { momentE, holdMs }
+    hintPrefix = '随机六爻'
   } else if (input.method === 'color' && extras.rgb) {
     const [r, g, b] = extras.rgb
-    const s = r * 65537 + g * 257 + b
+    const s = withEntropySeed(r * 65537 + g * 257 + b, extras)
     pan = castLiuyao('seed', new Date(), s)
-    seed = { rgb: [r, g, b], numbers: [r, g, b] }
-    hintPrefix = `颜色六爻 · RGB(${r},${g},${b})`
+    seed = { rgb: [r, g, b], numbers: [r, g, b], momentE, holdMs }
+    hintPrefix = '颜色六爻'
   } else if (input.method === 'geo' && extras.geo) {
     const { lat, lon, label } = extras.geo
-    const s = toSeedInt(lat) * 997 + toSeedInt(lon)
+    const s = withEntropySeed(toSeedInt(lat) * 997 + toSeedInt(lon), extras)
     pan = castLiuyao('seed', new Date(), s)
-    seed = { lat, lon, placeLabel: label }
-    hintPrefix = `地理六爻 · ${label || `${lat.toFixed(4)},${lon.toFixed(4)}`}`
+    seed = { lat, lon, placeLabel: label, momentE, holdMs }
+    hintPrefix = label || '地理六爻'
   } else if (input.method === 'weather' && extras.weather) {
     const w = extras.weather
-    const s =
+    const s = withEntropySeed(
       Math.round(Math.abs(w.tempC) * 10) * 131 +
-      Math.round(w.humidity) * 17 +
-      Math.round(w.pressure ?? 1013)
+        Math.round(w.humidity) * 17 +
+        Math.round(w.pressure ?? 1013),
+      extras,
+    )
     pan = castLiuyao('seed', new Date(), s)
     seed = {
       lat: w.lat,
@@ -72,8 +85,10 @@ function castLiuyaoUnified(input: CastInput, extras: CastExtras): CastResult {
       tempC: w.tempC,
       humidity: w.humidity,
       pressure: w.pressure,
+      momentE,
+      holdMs,
     }
-    hintPrefix = `气象六爻 · ${w.tempC.toFixed(1)}°C / 湿${Math.round(w.humidity)}%`
+    hintPrefix = w.placeLabel || '气象六爻'
   } else {
     pan = castLiuyao('time')
     hintPrefix = '时间六爻'
@@ -82,7 +97,7 @@ function castLiuyaoUnified(input: CastInput, extras: CastExtras): CastResult {
   const r = liuyaoToCastResult(input, pan)
   return {
     ...r,
-    lunarHint: `${hintPrefix} · ${pan.hint}`,
+    lunarHint: hintPrefix,
     seed: seed || r.seed,
   }
 }
@@ -91,43 +106,46 @@ function castQimenUnified(input: CastInput, extras: CastExtras): CastResult {
   let juOverride: number | undefined
   let seedHint = '时家'
   let seed: CastSeed | undefined
+  const holdMs = extras.entropy?.holdMs
+  const momentE = extras.entropy?.enabled ? entropySeedInt(extras.entropy) : undefined
+  const mix = entropySeedInt(extras.entropy)
 
   if (
     (input.method === 'number' || input.method === 'random') &&
     extras.numbers
   ) {
     const [a, b, c] = extras.numbers
-    juOverride = ((a + b + c - 1) % 9) + 1
-    seedHint =
-      input.method === 'random'
-        ? `随机定${juOverride}局 · ${a}/${b}/${c}`
-        : `三数 ${a}/${b}/${c} 定${juOverride}局`
-    seed = { numbers: extras.numbers }
+    juOverride = ((a + b + c + mix - 1) % 9) + 1
+    seedHint = input.method === 'random' ? '随机定局' : '三数定局'
+    seed = { numbers: extras.numbers, momentE, holdMs }
   } else if (input.method === 'random') {
     const a = 1 + Math.floor(Math.random() * 999)
     const b = 1 + Math.floor(Math.random() * 999)
     const c = 1 + Math.floor(Math.random() * 999)
-    juOverride = ((a + b + c - 1) % 9) + 1
-    seedHint = `随机定${juOverride}局 · ${a}/${b}/${c}`
-    seed = { numbers: [a, b, c] }
+    juOverride = ((a + b + c + mix - 1) % 9) + 1
+    seedHint = '随机定局'
+    seed = { numbers: [a, b, c], momentE, holdMs }
   } else if (input.method === 'color' && extras.rgb) {
     const [r, g, b] = extras.rgb
-    juOverride = ((r + g + b - 1) % 9) + 1
-    seedHint = `颜色 RGB(${r},${g},${b}) 定${juOverride}局`
-    seed = { rgb: [r, g, b], numbers: [r, g, b] }
+    juOverride = ((r + g + b + mix - 1) % 9) + 1
+    seedHint = '颜色定局'
+    seed = { rgb: [r, g, b], numbers: [r, g, b], momentE, holdMs }
   } else if (input.method === 'geo' && extras.geo) {
     const { lat, lon, label } = extras.geo
-    juOverride = ((toSeedInt(lat) + toSeedInt(lon) - 1) % 9) + 1
-    seedHint = `地理定${juOverride}局 · ${label || `${lat.toFixed(4)},${lon.toFixed(4)}`}`
-    seed = { lat, lon, placeLabel: label }
+    juOverride = ((toSeedInt(lat) + toSeedInt(lon) + mix - 1) % 9) + 1
+    seedHint = label || '地理定局'
+    seed = { lat, lon, placeLabel: label, momentE, holdMs }
   } else if (input.method === 'weather' && extras.weather) {
     const w = extras.weather
     juOverride =
-      ((Math.abs(Math.round(w.tempC)) + Math.round(w.humidity) + Math.round(w.pressure ?? 1013) -
+      ((Math.abs(Math.round(w.tempC)) +
+        Math.round(w.humidity) +
+        Math.round(w.pressure ?? 1013) +
+        mix -
         1) %
         9) +
       1
-    seedHint = `气象定${juOverride}局 · ${w.tempC.toFixed(1)}°C`
+    seedHint = w.placeLabel || '气象定局'
     seed = {
       lat: w.lat,
       lon: w.lon,
@@ -135,6 +153,8 @@ function castQimenUnified(input: CastInput, extras: CastExtras): CastResult {
       tempC: w.tempC,
       humidity: w.humidity,
       pressure: w.pressure,
+      momentE,
+      holdMs,
     }
   }
 

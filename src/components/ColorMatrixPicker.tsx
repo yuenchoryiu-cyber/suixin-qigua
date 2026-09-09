@@ -97,7 +97,7 @@ export function ColorMatrixPicker({
                   height: `${(cellH / size.h) * 100}%`,
                   background: `rgb(${c.rgb.r},${c.rgb.g},${c.rgb.b})`,
                 }}
-                title={`RGB(${c.rgb.r}, ${c.rgb.g}, ${c.rgb.b})`}
+                title="点选此色"
                 onClick={() => onChange(c.rgb)}
               />
             )
@@ -110,12 +110,10 @@ export function ColorMatrixPicker({
             className="color-swatch"
             style={{ background: `rgb(${value.r},${value.g},${value.b})` }}
           />
-          <span>
-            RGB({value.r}, {value.g}, {value.b}) · 上 R / 下 G / 动 R+G+B
-          </span>
+          <span>已选中</span>
         </div>
       ) : (
-        <p className="sub">点选蜂巢中的一格；以该格真实 RGB 起卦。</p>
+        <p className="sub">点选蜂巢中的一格颜色即可。</p>
       )}
     </div>
   )

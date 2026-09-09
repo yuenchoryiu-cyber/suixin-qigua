@@ -3,37 +3,31 @@ import type { CastMethod, CastSeed } from '../shared/types'
 
 const META: Record<
   CastMethod,
-  { title: string; sub: string; channel: string }
+  { title: string; sub: string }
 > = {
   time: {
     title: '校时起卦',
-    sub: '正在校准年月日时…',
-    channel: '时间取数',
+    sub: '请稍候…',
   },
   geo: {
     title: '地理起卦',
-    sub: '正在锁定经纬…',
-    channel: '坐标取数',
+    sub: '正在确认地点…',
   },
   weather: {
     title: '天气起卦',
-    sub: '正在采样气温与湿度…',
-    channel: '气象取数',
+    sub: '正在确认地点与天气…',
   },
   number: {
     title: '数字起卦',
-    sub: '正在注入三数…',
-    channel: '三数取数',
+    sub: '请稍候…',
   },
   color: {
     title: '颜色起卦',
-    sub: '正在读取 RGB…',
-    channel: '颜色取数',
+    sub: '请稍候…',
   },
   random: {
     title: '随机起卦',
-    sub: '正在注入熵数…',
-    channel: '随机取数',
+    sub: '请稍候…',
   },
 }
 
@@ -71,10 +65,6 @@ export function CastAnim({
           <span>{pct}%</span>
         </div>
       </div>
-
-      <p className="sub" style={{ textAlign: 'center' }}>
-        随心起卦 · {meta.channel}
-      </p>
     </>
   )
 }
@@ -125,7 +115,7 @@ function TimeAnim() {
         </span>
       </div>
       <div className="chrono-date">
-        {now.getFullYear()}.{pad(now.getMonth() + 1)}.{pad(now.getDate())} · 校时中
+        {now.getFullYear()}.{pad(now.getMonth() + 1)}.{pad(now.getDate())}
       </div>
     </div>
   )
@@ -145,11 +135,6 @@ function GeoAnim({ seed }: { seed?: CastSeed | null }) {
         <div className="geo-scan" />
         <div className="geo-cross" />
         <div className="geo-ping" style={{ left: pinLeft, top: pinTop }} />
-        <div className="geo-coord">
-          {lat !== undefined && lon !== undefined
-            ? `LAT ${lat.toFixed(4)} · LON ${lon.toFixed(4)}`
-            : 'LAT  — — — · LON  — — —'}
-        </div>
       </div>
       {seed?.placeLabel && <div className="chrono-date">{seed.placeLabel}</div>}
     </div>
@@ -157,11 +142,6 @@ function GeoAnim({ seed }: { seed?: CastSeed | null }) {
 }
 
 function WeatherAnim({ seed }: { seed?: CastSeed | null }) {
-  const hum = seed?.humidity ?? 68
-  const tempWidth =
-    seed?.tempC !== undefined
-      ? `${Math.min(100, Math.max(8, ((seed.tempC + 10) / 50) * 100))}%`
-      : '40%'
   return (
     <div className="anim-stage">
       <div className="wx-panel">
@@ -175,26 +155,6 @@ function WeatherAnim({ seed }: { seed?: CastSeed | null }) {
           ))}
           <div className="wx-cloud wx-cloud-a" />
           <div className="wx-cloud wx-cloud-b" />
-        </div>
-        <div className="wx-meters">
-          <div className="wx-meter">
-            <span>TEMP</span>
-            <div className="wx-bar">
-              <i className="wx-fill" style={{ width: tempWidth }} />
-            </div>
-            <span className="wx-val">
-              {seed?.tempC !== undefined ? `${seed.tempC.toFixed(1)}°C` : '···'}
-            </span>
-          </div>
-          <div className="wx-meter">
-            <span>HUM%</span>
-            <div className="wx-bar">
-              <i className="wx-fill" style={{ width: `${Math.min(100, hum)}%` }} />
-            </div>
-            <span className="wx-val">
-              {seed?.humidity !== undefined ? `${hum}%` : '···'}
-            </span>
-          </div>
         </div>
       </div>
       {seed?.placeLabel && <div className="chrono-date">{seed.placeLabel}</div>}
@@ -241,9 +201,7 @@ function ColorAnim({ seed }: { seed?: CastSeed | null }) {
           className="color-anim-swatch"
           style={{ background: css || 'transparent' }}
         />
-        <div className="chrono-date">
-          {rgb ? `RGB(${rgb[0]}, ${rgb[1]}, ${rgb[2]})` : '读取色值…'}
-        </div>
+        <div className="chrono-date">{rgb ? '已取色' : '取色中…'}</div>
       </div>
     </div>
   )

@@ -32,6 +32,37 @@ function hourZhiNumber(hour: number, minute: number): number {
 
 const ZHI = '子丑寅卯辰巳午未申酉戌亥'
 
+/** 起卦瞬间环境变数：年支+月+日+时支+分+秒 */
+export function momentEnv(when: Date = new Date()): number {
+  const yZhi = yearZhiNumber(when.getFullYear())
+  const m = when.getMonth() + 1
+  const d = when.getDate()
+  const hZhi = hourZhiNumber(when.getHours(), when.getMinutes())
+  return yZhi + m + d + hZhi + when.getMinutes() + when.getSeconds()
+}
+
+/** 按压毫秒盐：保留时长信息，避免只落到很小余数 */
+export function holdSalt(holdMs: number): number {
+  const ms = Math.max(0, Math.floor(Math.abs(holdMs)))
+  return Math.floor(ms / 17) + (ms % 97)
+}
+
+export type CastEntropy = {
+  enabled: boolean
+  when?: Date
+  holdMs?: number
+}
+
+function entropyMix(ent?: CastEntropy): { E: number; H: number; mix: number; label: string } {
+  if (!ent?.enabled) return { E: 0, H: 0, mix: 0, label: '' }
+  const when = ent.when ?? new Date()
+  const E = momentEnv(when)
+  const H = holdSalt(ent.holdMs ?? 0)
+  const mix = E + H
+  const label = ''
+  return { E, H, mix, label }
+}
+
 function finish(
   method: CastMethod,
   input: CastInput,
@@ -88,30 +119,31 @@ export function castByTime(input: CastInput, when: Date = new Date()): CastResul
   )
 }
 
-/** 三数起卦：上=数1，下=数2，动=(1+2+3)%6 */
+/** 三数起卦：上=数1，下=数2，动=(1+2+3)%6；可混入瞬时 E + 按压 */
 export function castByNumbers(
   input: CastInput,
   n1: number,
   n2: number,
   n3: number,
+  ent?: CastEntropy,
 ): CastResult {
   const a = Math.max(1, Math.floor(Math.abs(n1)))
   const b = Math.max(1, Math.floor(Math.abs(n2)))
   const c = Math.max(1, Math.floor(Math.abs(n3)))
+  const { mix, E } = entropyMix(ent)
   return finish(
     'number',
     input,
-    mod8(a),
-    mod8(b),
-    mod6(a + b + c),
-    `三数 ${a} / ${b} / ${c}`,
-    { numbers: [a, b, c] },
+    mod8(a + mix),
+    mod8(b + mix),
+    mod6(a + b + c + mix),
+    `三数起卦`,
+    { numbers: [a, b, c], momentE: E || undefined, holdMs: ent?.holdMs },
   )
 }
 
 /**
- * 地理起卦：纬度→上，经度→下，动爻=(纬密+经密+时支)%6
- * 经纬保留两位小数后放大取整，保证同一地点短时可复现、移动后会变。
+ * 地理起卦：纬→上，经→下；混入瞬时 E + 按压后同地不同时/按压亦可变卦
  */
 export function castByGeo(
   input: CastInput,
@@ -119,63 +151,70 @@ export function castByGeo(
   lon: number,
   label?: string,
   when: Date = new Date(),
+  ent?: CastEntropy,
 ): CastResult {
   const latSeed = toSeedInt(lat)
   const lonSeed = toSeedInt(lon)
   const hZhi = hourZhiNumber(when.getHours(), when.getMinutes())
   const place = label?.trim() || `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+  const { mix, E } = entropyMix({
+    enabled: ent?.enabled ?? true,
+    when: ent?.when ?? when,
+    holdMs: ent?.holdMs,
+  })
   return finish(
     'geo',
     input,
-    mod8(latSeed),
-    mod8(lonSeed),
-    mod6(latSeed + lonSeed + hZhi),
-    `地理 · ${place} · ${lat.toFixed(4)}°N/S ${lon.toFixed(4)}°E/W`,
-    { lat, lon, placeLabel: place },
+    mod8(latSeed + mix),
+    mod8(lonSeed + mix),
+    mod6(latSeed + lonSeed + hZhi + mix),
+    place,
+    { lat, lon, placeLabel: place, momentE: E || undefined, holdMs: ent?.holdMs },
   )
 }
 
-/**
- * 颜色起卦：R→上，G→下，动=(R+G+B)%6（用实际 RGB 0–255）
- */
+/** 颜色起卦：R→上，G→下；混入瞬时 E + 按压 */
 export function castByColor(
   input: CastInput,
   r: number,
   g: number,
   b: number,
+  ent?: CastEntropy,
 ): CastResult {
   const R = Math.max(0, Math.min(255, Math.round(r)))
   const G = Math.max(0, Math.min(255, Math.round(g)))
   const B = Math.max(0, Math.min(255, Math.round(b)))
+  const { mix, E } = entropyMix(ent)
   return finish(
     'color',
     input,
-    mod8(R || 256),
-    mod8(G || 256),
-    mod6(R + G + B || 6),
-    `颜色 · RGB(${R}, ${G}, ${B})`,
-    { rgb: [R, G, B], numbers: [R, G, B] },
+    mod8((R || 256) + mix),
+    mod8((G || 256) + mix),
+    mod6((R + G + B || 6) + mix),
+    `颜色起卦`,
+    { rgb: [R, G, B], numbers: [R, G, B], momentE: E || undefined, holdMs: ent?.holdMs },
   )
 }
 
-/** 随机取数：三枚熵数定上下卦与动爻 */
-export function castByRandom(input: CastInput): CastResult {
+/** 随机取数：三枚熵数；仍可再混入按压毫秒 */
+export function castByRandom(input: CastInput, ent?: CastEntropy): CastResult {
   const a = 1 + Math.floor(Math.random() * 999)
   const b = 1 + Math.floor(Math.random() * 999)
   const c = 1 + Math.floor(Math.random() * 999)
+  const { mix, E } = entropyMix(ent)
   return finish(
     'random',
     input,
-    mod8(a),
-    mod8(b),
-    mod6(a + b + c),
-    `随机 · ${a} / ${b} / ${c}`,
-    { numbers: [a, b, c] },
+    mod8(a + mix),
+    mod8(b + mix),
+    mod6(a + b + c + mix),
+    `随机起卦`,
+    { numbers: [a, b, c], momentE: E || undefined, holdMs: ent?.holdMs },
   )
 }
 
 /**
- * 天气起卦：气温→上，湿度→下，动=(气温整数+湿度+气压尾数)%6
+ * 天气起卦：气温→上，湿度→下；混入瞬时 E + 按压
  */
 export function castByWeather(
   input: CastInput,
@@ -187,18 +226,20 @@ export function castByWeather(
     lon: number
     placeLabel?: string
   },
+  ent?: CastEntropy,
 ): CastResult {
   const t = Math.round(opts.tempC)
   const hum = Math.max(1, Math.round(opts.humidity))
   const p = Math.round(opts.pressure ?? 1013)
   const place = opts.placeLabel || `${opts.lat.toFixed(2)},${opts.lon.toFixed(2)}`
+  const { mix, E } = entropyMix(ent)
   return finish(
     'weather',
     input,
-    mod8(Math.abs(t) + 1),
-    mod8(hum),
-    mod6(Math.abs(t) + hum + (p % 100)),
-    `气象 · ${place} · ${opts.tempC.toFixed(1)}°C · 湿度${hum}% · ${p}hPa`,
+    mod8(Math.abs(t) + 1 + mix),
+    mod8(hum + mix),
+    mod6(Math.abs(t) + hum + (p % 100) + mix),
+    place,
     {
       lat: opts.lat,
       lon: opts.lon,
@@ -206,65 +247,78 @@ export function castByWeather(
       tempC: opts.tempC,
       humidity: hum,
       pressure: p,
+      momentE: E || undefined,
+      holdMs: ent?.holdMs,
     },
   )
 }
 
+export type CastMethodExtras = {
+  numbers?: [number, number, number]
+  rgb?: [number, number, number]
+  geo?: { lat: number; lon: number; label?: string }
+  weather?: {
+    tempC: number
+    humidity: number
+    pressure?: number
+    lat: number
+    lon: number
+    placeLabel?: string
+  }
+  entropy?: CastEntropy
+}
+
 export async function castByMethod(
   input: CastInput,
-  extras: {
-    numbers?: [number, number, number]
-    rgb?: [number, number, number]
-    geo?: { lat: number; lon: number; label?: string }
-    weather?: {
-      tempC: number
-      humidity: number
-      pressure?: number
-      lat: number
-      lon: number
-      placeLabel?: string
-    }
-  },
+  extras: CastMethodExtras,
 ): Promise<CastResult> {
+  const ent = extras.entropy
   switch (input.method) {
     case 'time':
-      return castByTime(input)
+      return castByTime(input, ent?.when)
     case 'number': {
       const n = extras.numbers
       if (!n) throw new Error('请输入三个正整数。')
-      return castByNumbers(input, n[0], n[1], n[2])
+      return castByNumbers(input, n[0], n[1], n[2], ent)
     }
     case 'color': {
       const rgb = extras.rgb
       if (!rgb) throw new Error('请点选一种颜色。')
-      return castByColor(input, rgb[0], rgb[1], rgb[2])
+      return castByColor(input, rgb[0], rgb[1], rgb[2], ent)
     }
     case 'geo': {
       const g = extras.geo
       if (!g) throw new Error('缺少地理坐标。')
-      return castByGeo(input, g.lat, g.lon, g.label)
+      return castByGeo(input, g.lat, g.lon, g.label, ent?.when ?? new Date(), ent)
     }
     case 'weather': {
       const w = extras.weather
       if (!w) throw new Error('缺少气象数据。')
-      return castByWeather(input, w)
+      return castByWeather(input, w, ent)
     }
     case 'random': {
       const n = extras.numbers
       if (n) {
+        const { mix, E } = entropyMix(ent)
         return finish(
           'random',
           input,
-          mod8(n[0]),
-          mod8(n[1]),
-          mod6(n[0] + n[1] + n[2]),
-          `随机 · ${n[0]} / ${n[1]} / ${n[2]}`,
-          { numbers: [n[0], n[1], n[2]] },
+          mod8(n[0] + mix),
+          mod8(n[1] + mix),
+          mod6(n[0] + n[1] + n[2] + mix),
+          `随机起卦`,
+          { numbers: [n[0], n[1], n[2]], momentE: E || undefined, holdMs: ent?.holdMs },
         )
       }
-      return castByRandom(input)
+      return castByRandom(input, ent)
     }
     default:
       throw new Error('未知起卦方式')
   }
+}
+
+/** 供六爻 / 奇门把按压与瞬时 E 折成整数种子 */
+export function entropySeedInt(ent?: CastEntropy): number {
+  const { mix } = entropyMix(ent)
+  return mix
 }

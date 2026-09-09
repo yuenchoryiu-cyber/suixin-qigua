@@ -36,6 +36,7 @@ import {
 import { CLARIFY_CUSTOM_HINTS } from './clarify/hints'
 import { BOUNDARY_BANNER } from './shared/privacy'
 import { scrubSecrets } from './shared/scrub'
+import { formatScoreGrade } from './shared/scoreGrade'
 import {
   APP_NAME,
   APP_VERSION,
@@ -52,8 +53,10 @@ import { LUOSHU_VISUAL } from './qimen/pan'
 import { CastAnim } from './components/CastAnim'
 import { ColorMatrixPicker, type Rgb } from './components/ColorMatrixPicker'
 import { CityCascade, type CityPick } from './components/CityCascade'
+import { HoldCast } from './components/HoldCast'
+import { YijingDigitalRain } from './components/YijingDigitalRain'
 import { MapPicker } from './components/MapPicker'
-import { fetchWeather, resolveGeo } from './geo/location'
+import { fetchWeather, probeGpsAvailable, resolveGeo } from './geo/location'
 import { listHexagramCatalog } from './meihua/hexagrams'
 import { stage, wait } from './cast/progress'
 import {
@@ -83,6 +86,7 @@ type Page =
   | 'clarify'
   | 'confirm'
   | 'cast'
+  | 'hold'
   | 'anim'
   | 'reveal'
   | 'result'
@@ -124,6 +128,7 @@ const defaultSettings: AppSettings = {
   fontScale: 'md',
   highContrast: false,
   storeQuestions: true,
+  castReplayMode: false,
 }
 
 export default function App() {
@@ -141,6 +146,10 @@ export default function App() {
   const [clarifyAnswers, setClarifyAnswers] = useState<ClarifyAnswer[]>([])
   const [clarifyNodeId, setClarifyNodeId] = useState('')
   const [geoMode, setGeoMode] = useState<GeoPickMode>('gps')
+  const [gpsProbe, setGpsProbe] = useState<{
+    status: 'idle' | 'checking' | 'ok' | 'fail'
+    message?: string
+  }>({ status: 'idle' })
   const [city, setCity] = useState('')
   const [cityPick, setCityPick] = useState<CityPick | null>(null)
   const [manualCoords, setManualCoords] = useState('')
@@ -203,19 +212,19 @@ export default function App() {
     return CAST_METHODS.find((x) => x.id === m)?.label || m
   }
   const methodHint = (m: CastMethod) => {
-    if (school === 'liuyao' && m === 'number') return '六次摇钱，随机成卦'
-    if (school === 'liuyao' && m === 'time') return '以此时刻装卦'
-    if (school === 'liuyao' && m === 'geo') return '经纬化六爻'
-    if (school === 'liuyao' && m === 'weather') return '温湿气压化六爻'
-    if (school === 'liuyao' && m === 'color') return '以蜂巢 RGB 化六爻'
-    if (school === 'liuyao' && m === 'random') return '随机摇钱成卦'
-    if (school === 'qimen' && m === 'time') return '时家排盘'
-    if (school === 'qimen' && m === 'number') return '三数定局'
-    if (school === 'qimen' && m === 'geo') return '经纬定局'
-    if (school === 'qimen' && m === 'weather') return '气象定局'
-    if (school === 'qimen' && m === 'color') return 'RGB 定局'
-    if (school === 'qimen' && m === 'random') return '随机定局'
-    if (m === 'random') return '本机熵随机三数成卦'
+    if (school === 'liuyao' && m === 'number') return '点下一步，模拟摇钱成卦'
+    if (school === 'liuyao' && m === 'time') return '以此时此刻起卦'
+    if (school === 'liuyao' && m === 'geo') return '先选地点，再起卦'
+    if (school === 'liuyao' && m === 'weather') return '先选地点，再按天气起卦'
+    if (school === 'liuyao' && m === 'color') return '点选一种颜色即可'
+    if (school === 'liuyao' && m === 'random') return '一键随机成卦'
+    if (school === 'qimen' && m === 'time') return '以此时此刻排盘'
+    if (school === 'qimen' && m === 'number') return '输入三数后起卦'
+    if (school === 'qimen' && m === 'geo') return '先选地点，再排盘'
+    if (school === 'qimen' && m === 'weather') return '先选地点，再按天气排盘'
+    if (school === 'qimen' && m === 'color') return '点选一种颜色即可'
+    if (school === 'qimen' && m === 'random') return '一键随机排盘'
+    if (m === 'random') return '一键随机成卦'
     return CAST_METHODS.find((x) => x.id === m)?.hint || ''
   }
 
@@ -270,6 +279,25 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.apiKey])
+
+  useEffect(() => {
+    if (page !== 'cast') return
+    if (method !== 'geo' && method !== 'weather') return
+    if (geoMode !== 'gps') {
+      setGpsProbe({ status: 'idle' })
+      return
+    }
+    let cancelled = false
+    setGpsProbe({ status: 'checking' })
+    void probeGpsAvailable().then((r) => {
+      if (cancelled) return
+      if (r.ok) setGpsProbe({ status: 'ok' })
+      else setGpsProbe({ status: 'fail', message: r.message })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [page, method, geoMode])
 
   useEffect(() => {
     if (catMeta.scopePresets?.length && !scope) {
@@ -523,6 +551,26 @@ export default function App() {
       return
     }
 
+    if ((method === 'geo' || method === 'weather') && geoMode === 'gps') {
+      setBusy(true)
+      const probe =
+        gpsProbe.status === 'ok'
+          ? { ok: true as const }
+          : gpsProbe.status === 'fail'
+            ? { ok: false as const, message: gpsProbe.message }
+            : await probeGpsAvailable()
+      setBusy(false)
+      if (!probe.ok) {
+        const msg =
+          probe.message ||
+          '当前位置不可用，请改用「选择城市」或「地图点选」。'
+        setGpsProbe({ status: 'fail', message: msg })
+        setError(msg)
+        return
+      }
+      setGpsProbe({ status: 'ok' })
+    }
+
     const input = {
       category,
       subject: subject.trim() || undefined,
@@ -545,6 +593,23 @@ export default function App() {
       return
     }
 
+    if (settings.castReplayMode) {
+      void executeCast(0)
+      return
+    }
+    setPage('hold')
+  }
+
+  async function executeCast(holdMs: number) {
+    setError('')
+    const input = {
+      category,
+      subject: subject.trim() || undefined,
+      scope: catMeta.needsScope ? scope : undefined,
+      question: question.trim(),
+      method,
+    }
+
     setPage('anim')
     setBusy(true)
     setDailyMode(false)
@@ -561,16 +626,29 @@ export default function App() {
     }
     const getP = () => progress
 
-    try {
-      let extras: Parameters<typeof castUnified>[0]['extras'] = {}
+    const entropy = {
+      enabled: !settings.castReplayMode,
+      when: new Date(),
+      holdMs: settings.castReplayMode ? 0 : holdMs,
+    }
 
-      await stage('静心片刻，心中默念所问…', 12, 1600, setAnimStatus, setP, getP)
+    try {
+      let extras: Parameters<typeof castUnified>[0]['extras'] = { entropy }
+
+      await stage(
+        '静心片刻…',
+        12,
+        1600,
+        setAnimStatus,
+        setP,
+        getP,
+      )
 
       if (method === 'number') {
         if (school === 'liuyao') {
-          await stage('六次摇钱…', 40, 2200, setAnimStatus, setP, getP)
-          await stage('装纳甲 · 安世应…', 72, 2200, setAnimStatus, setP, getP)
-          await stage('配六亲六神…', 90, 1600, setAnimStatus, setP, getP)
+          await stage('摇钱成卦…', 40, 2200, setAnimStatus, setP, getP)
+          await stage('排盘中…', 72, 2200, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1600, setAnimStatus, setP, getP)
         } else {
           const numbers: [number, number, number] = [
             Math.floor(Number(num1)),
@@ -578,15 +656,15 @@ export default function App() {
             Math.floor(Number(num3)),
           ]
           setLiveSeed({ numbers })
-          extras = { numbers }
+          extras = { ...extras, numbers }
           if (school === 'qimen') {
-            await stage('三数定局…', 45, 1800, setAnimStatus, setP, getP)
-            await stage('排三奇六仪 · 转八门…', 72, 2000, setAnimStatus, setP, getP)
-            await stage('安九星八神…', 90, 1400, setAnimStatus, setP, getP)
+            await stage('三数排盘…', 45, 1800, setAnimStatus, setP, getP)
+            await stage('排盘中…', 72, 2000, setAnimStatus, setP, getP)
+            await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
           } else {
-            await stage('注入第一数，定上卦…', 35, 1800, setAnimStatus, setP, getP)
-            await stage('注入第二数，定下卦…', 62, 1800, setAnimStatus, setP, getP)
-            await stage('三数合流，定动爻…', 88, 1800, setAnimStatus, setP, getP)
+            await stage('取第一数…', 35, 1800, setAnimStatus, setP, getP)
+            await stage('取第二数…', 62, 1800, setAnimStatus, setP, getP)
+            await stage('合流成卦…', 88, 1800, setAnimStatus, setP, getP)
           }
         }
       } else if (method === 'random') {
@@ -596,51 +674,44 @@ export default function App() {
           1 + Math.floor(Math.random() * 999),
         ]
         setLiveSeed({ numbers })
-        extras = { numbers }
+        extras = { ...extras, numbers }
         if (school === 'liuyao') {
           await stage('随机摇钱…', 40, 2000, setAnimStatus, setP, getP)
-          await stage('装纳甲 · 安世应…', 72, 2000, setAnimStatus, setP, getP)
-          await stage('配六亲六神…', 90, 1400, setAnimStatus, setP, getP)
+          await stage('排盘中…', 72, 2000, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
         } else if (school === 'qimen') {
-          await stage(`随机三数 ${numbers.join('/')}…`, 40, 1800, setAnimStatus, setP, getP)
-          await stage('排三奇六仪 · 转八门…', 72, 2000, setAnimStatus, setP, getP)
-          await stage('安九星八神…', 90, 1400, setAnimStatus, setP, getP)
+          await stage('随机排盘…', 40, 1800, setAnimStatus, setP, getP)
+          await stage('排盘中…', 72, 2000, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
         } else {
-          await stage(`注入熵数 ${numbers[0]}…`, 35, 1600, setAnimStatus, setP, getP)
-          await stage(`第二数 ${numbers[1]}…`, 62, 1600, setAnimStatus, setP, getP)
-          await stage(`合流定动 · ${numbers[2]}…`, 88, 1600, setAnimStatus, setP, getP)
+          await stage('随机取数…', 35, 1600, setAnimStatus, setP, getP)
+          await stage('成卦中…', 62, 1600, setAnimStatus, setP, getP)
+          await stage('即将完成…', 88, 1600, setAnimStatus, setP, getP)
         }
       } else if (method === 'color' && colorRgb) {
         const rgb: [number, number, number] = [colorRgb.r, colorRgb.g, colorRgb.b]
         setLiveSeed({ rgb, numbers: rgb })
-        extras = { rgb }
-        await stage(
-          `读取 RGB(${rgb[0]}, ${rgb[1]}, ${rgb[2]})…`,
-          40,
-          1800,
-          setAnimStatus,
-          setP,
-          getP,
-        )
+        extras = { ...extras, rgb }
+        await stage('取色中…', 40, 1800, setAnimStatus, setP, getP)
         if (school === 'qimen') {
-          await stage('由色值定奇门局数…', 72, 2000, setAnimStatus, setP, getP)
-          await stage('排三奇六仪 · 转八门…', 90, 1400, setAnimStatus, setP, getP)
+          await stage('排盘中…', 72, 2000, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
         } else if (school === 'liuyao') {
-          await stage('由 RGB 化六爻…', 72, 2000, setAnimStatus, setP, getP)
-          await stage('装纳甲 · 安世应…', 90, 1400, setAnimStatus, setP, getP)
+          await stage('成卦中…', 72, 2000, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
         } else {
-          await stage('R 定上卦 · G 定下卦…', 68, 1800, setAnimStatus, setP, getP)
-          await stage('R+G+B 定动爻…', 90, 1600, setAnimStatus, setP, getP)
+          await stage('成卦中…', 68, 1800, setAnimStatus, setP, getP)
+          await stage('即将完成…', 90, 1600, setAnimStatus, setP, getP)
         }
       } else if (method === 'geo' || method === 'weather') {
         await stage(
           geoMode === 'gps'
-            ? '请求高精度定位…'
+            ? '确认当前位置…'
             : geoMode === 'city'
-              ? `锁定城市「${cityPick?.city || ''}」…`
+              ? `确认城市「${cityPick?.city || ''}」…`
               : geoMode === 'map'
-                ? '读取地图坐标…'
-                : '解析手输坐标…',
+                ? '确认地图选点…'
+                : '确认坐标…',
           28,
           2000,
           setAnimStatus,
@@ -671,24 +742,13 @@ export default function App() {
                 manual: manualCoords,
               })
         setLiveSeed({ lat: point.lat, lon: point.lon, placeLabel: point.label })
-        await stage(`锁定：${point.label}`, 55, 2200, setAnimStatus, setP, getP)
+        await stage(`地点：${point.label}`, 55, 2200, setAnimStatus, setP, getP)
 
         if (method === 'geo') {
-          await stage(
-            school === 'qimen'
-              ? '由经纬定奇门局数…'
-              : school === 'liuyao'
-                ? '由经纬化六爻…'
-                : '由经纬换算卦数…',
-            88,
-            2200,
-            setAnimStatus,
-            setP,
-            getP,
-          )
-          extras = { geo: { lat: point.lat, lon: point.lon, label: point.label } }
+          await stage('成卦中…', 88, 2200, setAnimStatus, setP, getP)
+          extras = { ...extras, geo: { lat: point.lat, lon: point.lon, label: point.label } }
         } else {
-          await stage('采样气温、湿度、气压…', 70, 2000, setAnimStatus, setP, getP)
+          await stage('确认天气…', 70, 2000, setAnimStatus, setP, getP)
           const wx = await fetchWeather(point)
           setLiveSeed({
             lat: wx.lat,
@@ -698,36 +758,25 @@ export default function App() {
             humidity: wx.humidity,
             pressure: wx.pressure,
           })
-          await stage(
-            `${wx.tempC.toFixed(1)}°C · 湿度 ${wx.humidity}%`,
-            88,
-            2000,
-            setAnimStatus,
-            setP,
-            getP,
-          )
-          extras = { weather: wx }
+          await stage('成卦中…', 88, 2000, setAnimStatus, setP, getP)
+          extras = { ...extras, weather: wx }
         }
       } else if (school === 'liuyao') {
-        await stage('校准时辰…', 40, 2000, setAnimStatus, setP, getP)
-        await stage('按时间起六爻…', 70, 2200, setAnimStatus, setP, getP)
-        await stage('装卦完成…', 90, 1400, setAnimStatus, setP, getP)
+        await stage('校时中…', 40, 2000, setAnimStatus, setP, getP)
+        await stage('成卦中…', 70, 2200, setAnimStatus, setP, getP)
+        await stage('即将完成…', 90, 1400, setAnimStatus, setP, getP)
       } else if (school === 'qimen') {
-        await stage('定阴阳遁与局数…', 38, 2200, setAnimStatus, setP, getP)
-        await stage('排三奇六仪 · 转八门…', 68, 2400, setAnimStatus, setP, getP)
-        await stage('安九星八神…', 90, 1600, setAnimStatus, setP, getP)
+        await stage('排盘中…', 38, 2200, setAnimStatus, setP, getP)
+        await stage('排盘中…', 68, 2400, setAnimStatus, setP, getP)
+        await stage('即将完成…', 90, 1600, setAnimStatus, setP, getP)
       } else {
-        await stage('校准年支与月日…', 40, 2200, setAnimStatus, setP, getP)
-        await stage('合入时辰，推演上下卦…', 72, 2400, setAnimStatus, setP, getP)
-        await stage('寻找动爻…', 88, 1600, setAnimStatus, setP, getP)
+        await stage('校时中…', 40, 2200, setAnimStatus, setP, getP)
+        await stage('成卦中…', 72, 2400, setAnimStatus, setP, getP)
+        await stage('即将完成…', 88, 1600, setAnimStatus, setP, getP)
       }
 
       await stage(
-        school === 'qimen'
-          ? '合盘…'
-          : school === 'liuyao'
-            ? '合成变卦…'
-            : '合成本卦、互卦、变卦…',
+        '即将完成…',
         96,
         1800,
         setAnimStatus,
@@ -813,7 +862,14 @@ export default function App() {
         question: '今日吉凶',
         method: route.method,
       }
-      const extras = route.numbers ? { numbers: route.numbers } : {}
+      const extras = {
+        ...(route.numbers ? { numbers: route.numbers } : {}),
+        entropy: {
+          enabled: !settings.castReplayMode,
+          when: new Date(),
+          holdMs: 0,
+        },
+      }
 
       await stage(
         `今日随机取道：${route.label}`,
@@ -1060,13 +1116,14 @@ export default function App() {
       summary: scrub(interpret.summary || interpret.title),
       body: scrub(
         [
+          interpret.verdict ? `【断盘】${interpret.verdict}` : '',
           interpret.body,
           interpret.timing ? `应期：${interpret.timing}` : '',
           interpret.advice
             ? `${dailyMode ? '今日宜' : '该不该做'}：${interpret.advice}`
             : '',
           interpret.dims
-            ? `综合${interpret.dims.overall} 爱情${interpret.dims.love} 事业${interpret.dims.career} 财运${interpret.dims.wealth} 身体${interpret.dims.health}`
+            ? `综合${formatScoreGrade(interpret.dims.overall)} 爱情${formatScoreGrade(interpret.dims.love)} 事业${formatScoreGrade(interpret.dims.career)} 财运${formatScoreGrade(interpret.dims.wealth)} 身体${formatScoreGrade(interpret.dims.health)}`
             : '',
         ]
           .filter(Boolean)
@@ -1163,12 +1220,21 @@ export default function App() {
             <button className="icon-btn" title="隐藏" onClick={() => void window.suixin?.hideWindow()}>
               —
             </button>
+            <button
+              className="icon-btn quit"
+              title="退出"
+              onClick={() => void window.suixin?.quitApp()}
+            >
+              ×
+            </button>
           </div>
         </header>
 
         <main className="content">
           {page === 'start' && (
             <div className="start-page">
+              <YijingDigitalRain className="yijing-rain" clearRatio={0.42} />
+              <div className="start-page-fg">
               <button
                 type="button"
                 className="start-emblem-wrap"
@@ -1216,6 +1282,7 @@ export default function App() {
               >
                 吉凶悔吝，生乎动者。
               </button>
+              </div>
             </div>
           )}
 
@@ -1554,7 +1621,12 @@ export default function App() {
                     </div>
                     {geoMode === 'gps' && (
                       <p className="sub" style={{ marginTop: 8 }}>
-                        需系统打开「位置」服务。室内平板/电脑常无 GPS，失败时请改用城市或地图。
+                        {gpsProbe.status === 'checking' && '正在检查定位是否可用…'}
+                        {gpsProbe.status === 'ok' && '定位可用，可继续起卦。'}
+                        {gpsProbe.status === 'fail' &&
+                          (gpsProbe.message ||
+                            '当前位置不可用，请改用「选择城市」或「地图点选」。')}
+                        {gpsProbe.status === 'idle' && '将使用当前位置。'}
                       </p>
                     )}
                   </div>
@@ -1634,25 +1706,22 @@ export default function App() {
               )}
 
               {method === 'number' && school === 'liuyao' && (
-                <p className="sub">将模拟六次铜钱摇卦（随机），无需手输数字。</p>
+                <p className="sub">点下一步即可摇钱成卦。</p>
               )}
 
               {method === 'color' && (
                 <div className="field">
-                  <label>点选颜色（蜂巢取 RGB）</label>
+                  <label>点选颜色</label>
                   <ColorMatrixPicker value={colorRgb} onChange={setColorRgb} />
                 </div>
               )}
 
               {method === 'random' && (
-                <p className="sub">
-                  无需手输；起卦时由本机随机取数
-                  {school === 'liuyao' ? '并摇钱成卦' : school === 'qimen' ? '定局' : '成卦'}。
-                </p>
+                <p className="sub">无需手输，点下一步即可。</p>
               )}
 
               {school === 'qimen' && method === 'time' && (
-                <p className="sub">以当前时辰起时家奇门盘。</p>
+                <p className="sub">以当前时辰排盘。</p>
               )}
 
               <div className="field">
@@ -1668,7 +1737,16 @@ export default function App() {
                 </label>
               </div>
 
-              <button className="btn block" disabled={busy} onClick={() => void startCast()}>
+              <button
+                className="btn block"
+                disabled={
+                  busy ||
+                  ((method === 'geo' || method === 'weather') &&
+                    geoMode === 'gps' &&
+                    (gpsProbe.status === 'checking' || gpsProbe.status === 'fail'))
+                }
+                onClick={() => void startCast()}
+              >
                 {method === 'time' && '校时起卦'}
                 {method === 'geo' && '锁定坐标起卦'}
                 {method === 'weather' && '采样气象起卦'}
@@ -1687,6 +1765,16 @@ export default function App() {
                 返回确认所问
               </button>
             </>
+          )}
+
+          {page === 'hold' && (
+            <HoldCast
+              onComplete={(ms) => void executeCast(ms)}
+              onCancel={() => {
+                setError('')
+                setPage('cast')
+              }}
+            />
           )}
 
           {page === 'anim' && (
@@ -1870,10 +1958,18 @@ export default function App() {
                 <>
                   <div className="boundary-banner">{BOUNDARY_BANNER}</div>
                   <div className="interpret-block">
+                    {interpret.verdict && (
+                      <div className="interpret-verdict">
+                        <div className="verdict-k">断盘</div>
+                        <div className="verdict-body">{interpret.verdict}</div>
+                      </div>
+                    )}
                     <div className="interpret-title">
                       <span>{interpret.title}</span>
                       {interpret.score != null && (
-                        <span className="interpret-score">{interpret.score}/10</span>
+                        <span className="interpret-score">
+                          {formatScoreGrade(interpret.score)}
+                        </span>
                       )}
                     </div>
                     {interpret.theme && (
@@ -1920,7 +2016,7 @@ export default function App() {
                             <div className="dim-bar">
                               <div style={{ width: `${n * 10}%` }} />
                             </div>
-                            <strong>{n}</strong>
+                            <strong>{formatScoreGrade(n)}</strong>
                             {interpret.dimHints?.[key] && (
                               <span className="dim-hint">{interpret.dimHints[key]}</span>
                             )}
@@ -2345,6 +2441,24 @@ export default function App() {
                     />{' '}
                     历史中保存问句
                   </label>
+                </div>
+                <div className="field">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={!!settings.castReplayMode}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          castReplayMode: e.target.checked,
+                        }))
+                      }
+                    />{' '}
+                    复现模式（同输入同卦，跳过按压）
+                  </label>
+                  <p className="sub" style={{ marginTop: 6 }}>
+                    默认关闭。开启后便于对照练习。
+                  </p>
                 </div>
               </div>
 

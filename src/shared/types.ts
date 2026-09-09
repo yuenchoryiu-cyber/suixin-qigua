@@ -25,6 +25,11 @@ export interface AppSettings {
   highContrast?: boolean
   /** 是否把问句写入历史（关闭则脱敏） */
   storeQuestions?: boolean
+  /**
+   * 复现模式：关闭瞬时环境变数与按压毫秒混入（同输入同卦，便于对照）。
+   * 默认 false = 开启环境变数。
+   */
+  castReplayMode?: boolean
 }
 
 /** OpenAI 兼容接口预设（填 Base URL + 模型名即可） */
@@ -180,11 +185,11 @@ export type CastMethod = 'time' | 'geo' | 'weather' | 'number' | 'color' | 'rand
 
 export const CAST_METHODS: { id: CastMethod; label: string; ready: boolean; hint: string }[] = [
   { id: 'time', label: '时间', ready: true, hint: '以此时此刻起卦' },
-  { id: 'number', label: '数字', ready: true, hint: '自选或随机三数' },
-  { id: 'geo', label: '地理', ready: true, hint: '定位 / 城市 / 地图' },
-  { id: 'weather', label: '天气', ready: true, hint: '温湿气压取象' },
-  { id: 'color', label: '颜色', ready: true, hint: '蜂巢点选，取真实 RGB' },
-  { id: 'random', label: '随机', ready: true, hint: '本机熵随机取数成卦' },
+  { id: 'number', label: '数字', ready: true, hint: '输入或随机三数' },
+  { id: 'geo', label: '地理', ready: true, hint: '先选地点再起卦' },
+  { id: 'weather', label: '天气', ready: true, hint: '先选地点再起卦' },
+  { id: 'color', label: '颜色', ready: true, hint: '点选一种颜色' },
+  { id: 'random', label: '随机', ready: true, hint: '一键随机成卦' },
 ]
 
 export type GeoPickMode = 'gps' | 'city' | 'manual' | 'map'
@@ -199,6 +204,10 @@ export interface CastSeed {
   numbers?: number[]
   /** 颜色起卦：实际 RGB 0–255 */
   rgb?: [number, number, number]
+  /** 瞬时环境变数 E */
+  momentE?: number
+  /** 按压起卦毫秒 */
+  holdMs?: number
 }
 
 export interface CastInput {
@@ -258,7 +267,7 @@ export interface InterpretResult {
   title: string
   body: string
   tone: 'auspicious' | 'mixed' | 'challenging'
-  /** 所问之事顺遂度 1–10 */
+  /** 内部顺遂度 1–10；界面显示为 大吉 SSS～大凶 F */
   score?: number
   disclaimer: string
   /** 高精度模式下的追问（2～3 条） */
@@ -271,6 +280,11 @@ export interface InterpretResult {
   mind?: string
   /** 初解短摘要（结果页默认只显示这段） */
   summary?: string
+  /**
+   * 文言/半文言断盘（解答第一部分，非白话）。
+   * 其后接 summary / body 等白话分段。
+   */
+  verdict?: string
   /** 今日主题（仅每日一卦） */
   theme?: string
   /** 今日吉凶多维打分（仅每日一卦） */

@@ -21,6 +21,7 @@ export const defaultSettings: AppSettings = {
   fontScale: 'md',
   highContrast: false,
   storeQuestions: true,
+  castReplayMode: false,
 }
 
 const defaults: PersistData = {

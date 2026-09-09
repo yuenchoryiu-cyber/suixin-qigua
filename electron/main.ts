@@ -253,6 +253,11 @@ function registerIpc() {
     mainWindow?.hide()
   })
 
+  ipcMain.handle('window:quit', () => {
+    quitting = true
+    app.quit()
+  })
+
   ipcMain.handle(
     'share:save',
     async (_e, payload: { dataUrl: string; suggestedName: string }) => {

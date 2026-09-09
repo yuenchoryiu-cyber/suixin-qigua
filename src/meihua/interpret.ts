@@ -4,6 +4,7 @@ import type {
   DimScores,
   InterpretResult,
 } from '../shared/types'
+import { formatScoreGrade } from '../shared/scoreGrade'
 import { liuyaoPromptBlock } from '../liuyao/pan'
 import { qimenPromptBlock } from '../qimen/pan'
 
@@ -64,8 +65,10 @@ function seedLines(cast: CastResult): string {
   if (s.tempC !== undefined) parts.push(`气温：${s.tempC.toFixed(1)}°C`)
   if (s.humidity !== undefined) parts.push(`湿度：${s.humidity}%`)
   if (s.pressure !== undefined) parts.push(`气压：${s.pressure}hPa`)
-  if (s.numbers?.length) parts.push(`三数：${s.numbers.join(' / ')}`)
-  if (s.rgb?.length) parts.push(`RGB：${s.rgb.join(', ')}`)
+  if (s.numbers?.length && cast.method === 'number') {
+    parts.push(`三数：${s.numbers.join(' / ')}`)
+  }
+  if (s.rgb?.length) parts.push('颜色：已取色')
   return parts.join('\n')
 }
 
@@ -80,6 +83,7 @@ function parseInterpret(content: string): InterpretResult {
       mind?: string
       summary?: string
       theme?: string
+      verdict?: string
       dims?: unknown
       dimHints?: unknown
     }
@@ -92,6 +96,7 @@ function parseInterpret(content: string): InterpretResult {
     const mind = parsed.mind?.trim() || undefined
     const summary = parsed.summary?.trim() || undefined
     const theme = parsed.theme?.trim() || undefined
+    const verdict = parsed.verdict?.trim() || undefined
     const body = parsed.body || content
     return {
       title: parsed.title || '解卦',
@@ -104,6 +109,7 @@ function parseInterpret(content: string): InterpretResult {
       advice,
       mind,
       summary: summary || body.slice(0, 48).replace(/\s+/g, '') + (body.length > 48 ? '…' : ''),
+      verdict,
       theme,
       dims: parseDims(parsed.dims),
       dimHints: parseDimHints(parsed.dimHints),
@@ -212,6 +218,9 @@ export async function interpretCast(options: {
           }),
     )
     remote.source = 'llm'
+    if (!remote.verdict?.trim()) {
+      remote.verdict = localClassicalVerdict(cast, !!daily)
+    }
     return remote
   } catch {
     // 云端 Key 无效 / 网络失败：回退本地起卦解析
@@ -253,8 +262,10 @@ export async function refineWithAnswers(options: {
     question.trim() ||
     `（心中默念「${categoryLabel}」相关之事${subject ? `，对象：${subject}` : ''}）`
 
-  const system = `你是「随心起卦」解卦助手。用户已看过初解，并回答了追问。请用白话给出**更扣题、更具体**的二次解读。
-规则：不改卦名/盘面；可调整顺遂度评分；正向开解；输出 JSON：{"title","summary","body","tone","score","timing","advice","mind","disclaimer"}。不要再输出 followUps。
+  const system = `你是「随心起卦」解卦助手。用户已看过初解，并回答了追问。请给出**更扣题、更具体**的二次解读。
+规则：不改卦名/盘面；可调整顺遂度评分；正向开解。
+先写 verdict（非白话简短断盘，可据追问略作修正），再写白话 summary/body 等。
+输出 JSON：{"verdict","title","summary","body","tone","score","timing","advice","mind","disclaimer"}。不要再输出 followUps。
 body 须自然揉入应期、宜忌与心态；timing / advice / mind / summary 再各给短字段便于展示。
 ${schoolRules(cast)}`
 
@@ -266,7 +277,12 @@ ${castFacts(cast)}
 用户追问作答：
 ${answers.map((x, i) => `${i + 1}. ${x.q}\n答：${x.a || '（跳过）'}`).join('\n')}`
 
-  return callLlm(settings, { system, user })
+  return callLlm(settings, { system, user }).then((r) => {
+    if (!r.verdict?.trim()) {
+      r.verdict = previous.verdict || localClassicalVerdict(cast, false)
+    }
+    return r
+  })
 }
 
 /** 解卦后多轮追问（保留上下文） */
@@ -330,16 +346,17 @@ function buildPrompt(ctx: {
     ? `9. 高精度模式：额外给 2～3 条**短追问**（口语、具体、扣题），放入 JSON 字段 followUps 字符串数组，用来澄清心意以便二次精解。不要问姓名。`
     : `9. 普通模式：不要输出 followUps。`
 
-  const system = `你是「随心起卦」的解卦助手。用**当代口语、说人话**写解读，像朋友聊天，不要文言堆砌，不要游戏黑话。
+  const system = `你是「随心起卦」的解卦助手。解答分两段：先文言断盘，再白话开解。
 硬性规则：
 1. ${schoolRules(cast)}
-2. **必须扣题**：紧扣所求类别（${ctx.categoryLabel}）与对象/范围；给 1–10「顺遂度」score。
-3. **应期、行动、心态须揉进 body**：正文里自然写出大概何时应验、当下该不该做、心态怎么摆；同时另填 timing、advice、mind、summary（summary 一句≤28字总括）。
-4. 吉就实在鼓励；凶就温和开解、给能做的小事。正向收束。
-5. 若用户没写具体问题（心中默念），按类别来解，不要追问姓名。
-6. 文末自然带一句：卦象仅供参考，不可尽信。
-7. 只输出 JSON：{"title":"短标题","summary":"一句总括","body":"正文","tone":"auspicious|mixed|challenging","score":7,"timing":"应期一句","advice":"宜忌一句","mind":"心态一句","disclaimer":"一句白话免责"${ctx.highPrecision ? ',"followUps":["追问1","追问2"]' : ''}}
-8. body 约 160–300 字；score 为整数 1–10。
+2. **verdict（第一部分）**：用**非白话**口吻（文言或半文言）作简短断盘，约 40–90 字。只断象、断体用/世应或门星趋向、吉凶悔吝之势；勿写口语，勿给操作清单。
+3. **必须扣题**：紧扣所求类别（${ctx.categoryLabel}）与对象/范围；内部给整数 score（1–10），界面会换成「大吉 SSS～大凶 F」，正文与 summary 里不要写「x/10」。
+4. **应期、行动、心态须揉进 body**：正文用当代口语；同时另填 timing、advice、mind、summary（summary 一句≤28字总括）。
+5. 吉就实在鼓励；凶就温和开解、给能做的小事。正向收束。
+6. 若用户没写具体问题（心中默念），按类别来解，不要追问姓名。
+7. 文末自然带一句：卦象仅供参考，不可尽信。
+8. 只输出 JSON：{"verdict":"文言断盘","title":"短标题","summary":"一句总括","body":"白话正文","tone":"auspicious|mixed|challenging","score":7,"timing":"应期一句","advice":"宜忌一句","mind":"心态一句","disclaimer":"一句白话免责"${ctx.highPrecision ? ',"followUps":["追问1","追问2"]' : ''}}
+9. body 约 160–300 字；score 为整数 1–10。
 ${followRule}`
 
   const user = `类别：${ctx.categoryLabel}
@@ -356,16 +373,17 @@ ${castFacts(cast)}`
 
 function buildDailyPrompt(ctx: { cast: CastResult }): { system: string; user: string } {
   const { cast } = ctx
-  const system = `你是「随心起卦」的今日流日助手。用当代口语写「今日吉凶」参考，不要文言堆砌。
+  const system = `你是「随心起卦」的今日流日助手。解答分两段：先文言断盘，再白话开解。
 硬性规则：
 1. ${schoolRules(cast)}
-2. 这是**一日一卦**的流日参考；取数方式可能是梅花/六爻/奇门中的随机一种，以盘面为准，不要改盘。
-3. body 约 140–220 字：先总评今日气场，再各用一两句点到爱情/事业/财运/身体；应期可写成「今日侧重 / 傍晚留意」之类，揉进正文。
-4. advice 给一句「今天适合推进什么 / 先别硬刚什么」；mind 给心态一句；theme 给「今日主题」四到八字；summary 一句总括。
-5. dims 各维打分 1–10 整数：overall、love、career、wealth、health；dimHints 各给一句极短说明。
-6. score 取 overall。
-7. 只输出 JSON：{"title":"今日短标题","theme":"今日主题","summary":"一句总括","body":"正文","tone":"auspicious|mixed|challenging","score":7,"timing":"今日节奏一句","advice":"今日宜忌一句","mind":"心态一句","dims":{"overall":7,"love":6,"career":7,"wealth":5,"health":8},"dimHints":{"overall":"综","love":"情","career":"事","wealth":"财","health":"身"},"disclaimer":"一句白话免责"}
-8. 正向收束；不可尽信。`
+2. **verdict**：非白话简短断今日之象（文言或半文言，40–80 字），只断气机趋向。
+3. 这是**一日一卦**的流日参考；以盘面为准，不要改盘。
+4. body 约 140–220 字白话：先总评今日气场，再各用一两句点到爱情/事业/财运/身体。
+5. advice 给一句「今天适合推进什么 / 先别硬刚什么」；mind 给心态一句；theme 给「今日主题」四到八字；summary 一句总括。
+6. dims 各维打分 1–10 整数：overall、love、career、wealth、health；dimHints 各给一句极短说明。
+7. score 取 overall。
+8. 只输出 JSON：{"verdict":"文言断盘","title":"今日短标题","theme":"今日主题","summary":"一句总括","body":"白话正文","tone":"auspicious|mixed|challenging","score":7,"timing":"今日节奏一句","advice":"今日宜忌一句","mind":"心态一句","dims":{"overall":7,"love":6,"career":7,"wealth":5,"health":8},"dimHints":{"overall":"综","love":"情","career":"事","wealth":"财","health":"身"},"disclaimer":"一句白话免责"}
+9. 正向收束；不可尽信。`
 
   const user = `模式：今日吉凶（一天一次，取数路径已随机）
 体系与取数：${cast.lunarHint}
@@ -445,6 +463,26 @@ export function chatCompletionsUrl(baseUrl: string): string {
   return `${b}/v1/chat/completions`
 }
 
+function localClassicalVerdict(cast: CastResult, daily: boolean): string {
+  const school = cast.school || 'meihua'
+  const moving = cast.changeYao
+  const judg = (cast.ben.judgment || '').replace(/\s+/g, '').slice(0, 36)
+  if (school === 'liuyao' && cast.liuyao) {
+    return `得「${cast.liuyao.benName}」，世${cast.liuyao.shi}而应${cast.liuyao.ying}。动在第${moving}爻，变趋「${cast.liuyao.bianName}」。${
+      daily ? '一日之气，宜审进退。' : '吉凶悔吝，生乎动者也。'
+    }`
+  }
+  if (school === 'qimen' && cast.qimen) {
+    return `局为「${cast.qimen.dun}${cast.qimen.ju}」，值使${cast.qimen.zhiShi}门。日${cast.qimen.dayGanZhi}、时${cast.qimen.hourZhi}，门星相推。${
+      daily ? '流日之象，当因势而处。' : '用神所落，察其开合。'
+    }`
+  }
+  const ti = cast.tiIsUpper ? '上体下用' : '下体上用'
+  return `本卦「${cast.ben.name}」，上${cast.ben.upper.name}下${cast.ben.lower.name}，动第${moving}爻（${ti}）。互「${cast.hu.name}」，变「${cast.bian.name}」。${judg}${
+    judg.endsWith('。') ? '' : '。'
+  }象既成矣，宜观体用生克。`
+}
+
 function localInterpret(ctx: {
   cast: CastResult
   question: string
@@ -491,7 +529,7 @@ function localInterpret(ctx: {
 
   if (daily) {
     title = '今日简参'
-    summary = `今日主题「${theme}」，综合约 ${score}/10。`
+    summary = `今日主题「${theme}」，综合${formatScoreGrade(score)}。`
     if (school === 'liuyao' && cast.liuyao) {
       body = `今日六爻「${cast.liuyao.benName}」，世${cast.liuyao.shi}应${cast.liuyao.ying}。主题偏「${theme}」：人际宜心平，做事看节奏，钱财先守，身体顾作息。${timing}。${advice}`
     } else if (school === 'qimen' && cast.qimen) {
@@ -501,17 +539,17 @@ function localInterpret(ctx: {
     }
   } else if (school === 'liuyao' && cast.liuyao) {
     title = '六爻简解'
-    summary = `「${cast.liuyao.benName}」世${cast.liuyao.shi}应${cast.liuyao.ying}，约 ${score}/10。`
-    body = `六爻得「${cast.liuyao.benName}」，世${cast.liuyao.shi}应${cast.liuyao.ying}，宫「${cast.liuyao.gong}」。就「${categoryLabel}」看，顺遂度约 ${score}/10。动在第 ${moving} 爻，先看世应远近与动爻六亲：应近则事在眼前，应远则宜蓄力。变卦「${cast.liuyao.bianName}」提示转折方向。${timing}。${advice} 盘面只供参照，落地还靠你。`
+    summary = `「${cast.liuyao.benName}」世${cast.liuyao.shi}应${cast.liuyao.ying}，${formatScoreGrade(score)}。`
+    body = `六爻得「${cast.liuyao.benName}」，世${cast.liuyao.shi}应${cast.liuyao.ying}，宫「${cast.liuyao.gong}」。就「${categoryLabel}」看，象级${formatScoreGrade(score)}。动在第 ${moving} 爻，先看世应远近与动爻六亲：应近则事在眼前，应远则宜蓄力。变卦「${cast.liuyao.bianName}」提示转折方向。${timing}。${advice} 盘面只供参照，落地还靠你。`
   } else if (school === 'qimen' && cast.qimen) {
     title = '奇门简解'
-    summary = `「${cast.qimen.dun}${cast.qimen.ju}」值使${cast.qimen.zhiShi}，约 ${score}/10。`
-    body = `奇门「${cast.qimen.dun}${cast.qimen.ju}」，日${cast.qimen.dayGanZhi}时${cast.qimen.hourZhi}，值使${cast.qimen.zhiShi}门。就「${categoryLabel}」看，顺遂度约 ${score}/10。先看用神落宫与门星生克：门开则宜沟通协作，门合则宜收束整顿。${timing}。${advice} 局盘是风向，决定在你手里。`
+    summary = `「${cast.qimen.dun}${cast.qimen.ju}」值使${cast.qimen.zhiShi}，${formatScoreGrade(score)}。`
+    body = `奇门「${cast.qimen.dun}${cast.qimen.ju}」，日${cast.qimen.dayGanZhi}时${cast.qimen.hourZhi}，值使${cast.qimen.zhiShi}门。就「${categoryLabel}」看，象级${formatScoreGrade(score)}。先看用神落宫与门星生克：门开则宜沟通协作，门合则宜收束整顿。${timing}。${advice} 局盘是风向，决定在你手里。`
   } else {
     title = '梅花简解'
-    summary = `「${cast.ben.name}」动第 ${moving} 爻，约 ${score}/10。`
+    summary = `「${cast.ben.name}」动第 ${moving} 爻，${formatScoreGrade(score)}。`
     const ti = cast.tiIsUpper ? '上体下用' : '下体上用'
-    body = `本卦「${cast.ben.name}」，上${cast.ben.upper.name}下${cast.ben.lower.name}，动第 ${moving} 爻（${ti}），互「${cast.hu.name}」，变「${cast.bian.name}」。就「${categoryLabel}」看，顺遂度约 ${score}/10。${cast.ben.judgment} 体卦为主、用卦为客，生克看远近。${timing}。${advice}`
+    body = `本卦「${cast.ben.name}」，上${cast.ben.upper.name}下${cast.ben.lower.name}，动第 ${moving} 爻（${ti}），互「${cast.hu.name}」，变「${cast.bian.name}」。就「${categoryLabel}」看，象级${formatScoreGrade(score)}。${cast.ben.judgment} 体卦为主、用卦为客，生克看远近。${timing}。${advice}`
   }
 
   const dims: DimScores | undefined = daily
@@ -527,6 +565,7 @@ function localInterpret(ctx: {
   return {
     title,
     summary,
+    verdict: localClassicalVerdict(cast, daily),
     body,
     tone,
     score,

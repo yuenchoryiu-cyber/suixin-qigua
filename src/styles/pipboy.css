@@ -244,6 +244,13 @@ select {
   box-shadow: 0 0 10px var(--pb-green-glow);
 }
 
+.icon-btn.quit:hover {
+  border-color: #c44;
+  color: #f88;
+  background: rgba(180, 40, 40, 0.18);
+  box-shadow: 0 0 10px rgba(255, 80, 80, 0.35);
+}
+
 .content {
   position: relative;
   z-index: 3;
@@ -274,6 +281,7 @@ select {
 }
 
 .start-page {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -283,6 +291,22 @@ select {
   padding: 8px 4px 12px;
   gap: 0;
   animation: start-in 0.7s ease-out both;
+  isolation: isolate;
+}
+.start-page-fg {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  justify-content: center;
+}
+.yijing-rain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.85;
 }
 @keyframes start-in {
   from {
@@ -415,6 +439,84 @@ select {
   font-size: var(--fs-body);
   padding: 14px 12px;
   margin-bottom: 8px;
+}
+
+.hold-cast {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+  min-height: min(420px, 72vh);
+  isolation: isolate;
+}
+.hold-cast-fg {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hold-cast-fg .h1,
+.hold-cast-fg .sub,
+.hold-cast-fg .hold-hint-line,
+.start-page-fg .start-version,
+.start-page-fg .start-quote {
+  text-shadow:
+    0 0 10px rgba(0, 0, 0, 0.85),
+    0 1px 0 rgba(0, 0, 0, 0.7);
+}
+.hold-pad {
+  position: relative;
+  align-self: center;
+  width: min(200px, 62vw);
+  aspect-ratio: 1;
+  margin: 10px 0 4px;
+  padding: 0;
+  border: 1px solid rgba(57, 255, 20, 0.35);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.55), rgba(0, 8, 0, 0.82) 70%);
+  color: var(--pb-green);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 0 28px rgba(57, 255, 20, 0.18),
+    inset 0 0 24px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.hold-pad.holding {
+  border-color: var(--pb-green);
+  box-shadow: 0 0 40px rgba(57, 255, 20, 0.45);
+  transform: scale(0.98);
+}
+.hold-pad.ready {
+  box-shadow: 0 0 48px rgba(57, 255, 20, 0.55);
+}
+.hold-taiji {
+  display: block;
+  filter: drop-shadow(0 0 10px rgba(57, 255, 20, 0.35));
+  transform-origin: 50% 50%;
+  animation: hold-taiji-spin 10s linear infinite;
+  pointer-events: none;
+}
+.hold-pad.holding .hold-taiji {
+  animation-duration: 3.2s;
+}
+.hold-hint-line {
+  text-align: center;
+  font-size: var(--fs-caption);
+  letter-spacing: 0.14em;
+  color: var(--pb-amber);
+  margin: 0 0 6px;
+  min-height: 1.4em;
+}
+@keyframes hold-taiji-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .sub {
@@ -1277,6 +1379,26 @@ select {
   border: 1px solid var(--pb-green-dim);
   background: rgba(0, 0, 0, 0.28);
 }
+.interpret-verdict {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(57, 255, 20, 0.22);
+}
+.verdict-k {
+  font-size: var(--fs-caption);
+  letter-spacing: 0.28em;
+  color: var(--pb-muted);
+  margin-bottom: 8px;
+}
+.verdict-body {
+  font-family: 'STKaiti', 'KaiTi', '华文楷体', 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 1.02rem;
+  line-height: 1.85;
+  color: var(--pb-green);
+  letter-spacing: 0.06em;
+  white-space: pre-wrap;
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.2);
+}
 .interpret-title {
   font-size: var(--fs-title);
   letter-spacing: 0.1em;
@@ -1291,7 +1413,7 @@ select {
 .interpret-score {
   font-size: var(--fs-caption);
   color: var(--pb-amber);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   white-space: nowrap;
 }
 .gua-grid {
@@ -1550,6 +1672,15 @@ select {
   padding-left: 18px;
   color: var(--pb-muted);
   font-size: var(--fs-caption);
+}
+.city-cascade-head.nested.province {
+  padding-left: 28px;
+  font-size: var(--fs-caption);
+}
+.city-count {
+  margin-left: 6px;
+  opacity: 0.55;
+  font-size: 0.85em;
 }
 .city-cascade-head.open,
 .city-cascade-head.selected {
@@ -1856,7 +1987,7 @@ select {
 }
 .dim-row {
   display: grid;
-  grid-template-columns: 42px 1fr 24px;
+  grid-template-columns: 42px 1fr minmax(4.5em, auto);
   align-items: center;
   gap: 8px;
   font-size: var(--fs-caption);
@@ -1872,6 +2003,8 @@ select {
 .dim-row strong {
   color: var(--pb-green);
   text-align: right;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .dim-bar {
   height: 6px;

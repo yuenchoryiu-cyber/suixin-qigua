@@ -183,6 +183,56 @@ export async function getIpLocation(): Promise<GeoPoint> {
   return { lat, lon, label: `${label}（仅供参考·IP 粗略）`, source: 'ip' }
 }
 
+/** 起卦前探测「当前位置」是否可用（短超时，不阻塞太久） */
+export async function probeGpsAvailable(timeoutMs = 5000): Promise<{
+  ok: boolean
+  message?: string
+}> {
+  if (!navigator.geolocation) {
+    return {
+      ok: false,
+      message: '本机不支持定位，请改用「选择城市」或「地图点选」。',
+    }
+  }
+  try {
+    const perms = navigator.permissions
+    if (perms?.query) {
+      const status = await perms.query({ name: 'geolocation' as PermissionName })
+      if (status.state === 'denied') {
+        return {
+          ok: false,
+          message:
+            '定位权限未开启。请在系统设置中允许本应用使用位置，或改用「选择城市」。',
+        }
+      }
+    }
+  } catch {
+    /* Permissions API 不可用时继续试定位 */
+  }
+
+  try {
+    await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: timeoutMs,
+        maximumAge: 120_000,
+      })
+    })
+    return { ok: true }
+  } catch (e) {
+    const err = e as GeolocationPositionError
+    const map: Record<number, string> = {
+      1: '定位权限未开启。请在系统设置中允许，或改用「选择城市」。',
+      2: '暂时拿不到位置。请改用「选择城市」或「地图点选」。',
+      3: '定位超时。请改用「选择城市」或「地图点选」。',
+    }
+    return {
+      ok: false,
+      message: map[err?.code ?? 0] || '当前位置不可用，请改用「选择城市」或「地图点选」。',
+    }
+  }
+}
+
 export async function resolveGeo(opts: {
   mode: 'gps' | 'city' | 'manual'
   city?: string

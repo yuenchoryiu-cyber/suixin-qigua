@@ -9,6 +9,7 @@ const api = {
   addHistory: (entry: HistoryEntry): Promise<boolean> =>
     ipcRenderer.invoke('history:add', entry),
   hideWindow: (): Promise<void> => ipcRenderer.invoke('window:hide'),
+  quitApp: (): Promise<void> => ipcRenderer.invoke('window:quit'),
   saveShareImage: (dataUrl: string, suggestedName: string) =>
     ipcRenderer.invoke('share:save', { dataUrl, suggestedName }),
   copyShareImage: (dataUrl: string) => ipcRenderer.invoke('share:clipboard', dataUrl),
