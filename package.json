@@ -1,6 +1,6 @@
 {
   "name": "suixin-qigua",
-  "version": "2.2.14",
+  "version": "2.2.15",
   "description": "随心起卦 — Pip-Boy 风格桌面起卦",
   "author": "suixin-qigua",
   "main": "dist-electron/main.js",

@@ -2999,7 +2999,7 @@ export default function App() {
             {updateStatus.phase === 'available' && (
               <p className="update-hint">
                 {updateStatus.message ||
-                  '将下载更新包到本机；打开更新包只会静默更新程序，不会进完整安装向导。中间版本可跳过。'}
+                  '下载更新后一键安装并重启。只会下载一份更新，不会再往「下载」文件夹复制整包。'}
               </p>
             )}
             {updateStatus.phase === 'downloading' && updateStatus.message && (
@@ -3022,7 +3022,7 @@ export default function App() {
             {updateStatus.phase === 'downloaded' && (
               <p className="update-hint">
                 {updateStatus.message ||
-                  '更新包已下载。点「打开更新包」将退出并仅更新程序（静默，无 Setup 向导）。'}
+                  '更新已就绪。将退出并静默安装，装完自动打开。'}
               </p>
             )}
             {updateStatus.phase === 'error' && (
@@ -3040,30 +3040,19 @@ export default function App() {
                     .finally(() => setUpdateBusy(false))
                 }}
               >
-                下载更新包
+                下载更新
               </button>
             )}
             {updateStatus.phase === 'downloaded' && (
-              <>
-                <button
-                  className="btn block"
-                  type="button"
-                  onClick={() => {
-                    void window.suixin?.installUpdate?.()
-                  }}
-                >
-                  打开更新包（仅更新程序）
-                </button>
-                <button
-                  className="btn ghost block"
-                  type="button"
-                  onClick={() => {
-                    void window.suixin?.revealUpdate?.()
-                  }}
-                >
-                  在文件夹中显示更新包
-                </button>
-              </>
+              <button
+                className="btn block"
+                type="button"
+                onClick={() => {
+                  void window.suixin?.installUpdate?.()
+                }}
+              >
+                安装并重启
+              </button>
             )}
             {updateStatus.phase === 'error' && (
               <button
@@ -3105,9 +3094,8 @@ export default function App() {
               当前 V{APP_VERSION} → 最新 V{updateInfo.version}
             </p>
             <p className="update-hint">
-              建议使用安装版的「下载更新包 → 打开更新包」流程（仅静默更新）。
-              若只能下完整 exe：安装程序会先结束旧进程再覆盖。
-              {updateInfo.assetName ? ` 文件：${updateInfo.assetName}` : ''}
+              安装版请优先用应用内「下载更新 → 安装并重启」。
+              {updateInfo.assetName ? ` 完整包：${updateInfo.assetName}` : ''}
             </p>
             <button
               className="btn block"

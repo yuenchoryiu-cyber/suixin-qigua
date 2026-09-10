@@ -356,6 +356,22 @@ if (!gotLock) {
       onQuitForUpdate: () => {
         quitting = true
       },
+      prepareQuitForUpdate: () => {
+        quitting = true
+        try {
+          tray?.destroy()
+        } catch {
+          /* ignore */
+        }
+        tray = null
+        try {
+          mainWindow?.removeAllListeners('close')
+          mainWindow?.destroy()
+        } catch {
+          /* ignore */
+        }
+        mainWindow = null
+      },
     })
     // 从桌面捷径启动时直接弹出面板
     showWindow()
@@ -369,5 +385,11 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     quitting = true
+    try {
+      tray?.destroy()
+    } catch {
+      /* ignore */
+    }
+    tray = null
   })
 }

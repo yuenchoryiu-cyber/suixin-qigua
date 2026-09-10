@@ -1,6 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
 import electronUpdater from 'electron-updater'
-import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { appendErrorLog } from './store'
@@ -13,17 +12,16 @@ const { autoUpdater } = electronUpdater
 let status: UpdateStatus = { phase: 'idle' }
 let getMainWindow: () => BrowserWindow | null = () => null
 let markQuitting: () => void = () => undefined
+/** 安装前清理托盘等，确保进程能真正退出 */
+let prepareQuitForUpdate: () => void = () => undefined
 let wired = false
-/** 已下载的安装包路径（缓存或复制到「下载」） */
-let downloadedInstallerPath: string | null = null
-/** 用户可双击的「仅更新」启动器（.cmd） */
-let updateLauncherPath: string | null = null
+/** electron-updater 缓存中的安装包路径（唯一下载落点，不再复制到「下载」） */
+let cachedInstallerPath: string | null = null
 
 function emit(next: UpdateStatus) {
   status = {
     ...next,
-    packagePath: next.packagePath ?? downloadedInstallerPath ?? undefined,
-    launcherPath: next.launcherPath ?? updateLauncherPath ?? undefined,
+    packagePath: next.packagePath ?? cachedInstallerPath ?? undefined,
   }
   getMainWindow()?.webContents.send('update:status', status)
 }
@@ -39,14 +37,6 @@ export function updaterEnabled(): boolean {
 
 export function getUpdateStatus(): UpdateStatus {
   return status
-}
-
-export function getDownloadedInstallerPath(): string | null {
-  return downloadedInstallerPath
-}
-
-export function getUpdateLauncherPath(): string | null {
-  return updateLauncherPath
 }
 
 /**
@@ -73,63 +63,71 @@ export function isVersionNewer(remote: string, local: string): boolean {
   return false
 }
 
-/** 复制更新包到「下载」，并写 .cmd：双击只静默更新，不进完整向导 */
-function publishUserUpdatePackage(srcInstaller: string, version: string): {
-  packagePath: string
-  launcherPath: string
-} | null {
+function resolveInstallerPath(): string | null {
+  const helper = (
+    autoUpdater as unknown as { downloadedUpdateHelper?: { file?: string | null } }
+  ).downloadedUpdateHelper
+  const fromHelper = helper?.file
+  if (fromHelper && fs.existsSync(fromHelper)) return fromHelper
+  if (cachedInstallerPath && fs.existsSync(cachedInstallerPath)) {
+    return cachedInstallerPath
+  }
+  return null
+}
+
+/**
+ * 静默更新：--updated（覆盖安装）+/S（无向导）+--force-run（装完拉起）。
+ * 先起安装器再退出，并销毁托盘，避免「退出了却没装 / 装完不重开」。
+ */
+function spawnSilentUpdateAndExit(installerPath: string): void {
+  markQuitting()
+  prepareQuitForUpdate()
+  const args = ['--updated', '/S', '--force-run']
+  appendErrorLog(`update:install spawn ${installerPath} ${args.join(' ')}`)
   try {
-    if (!srcInstaller || !fs.existsSync(srcInstaller)) return null
-    const downloads = app.getPath('downloads')
-    fs.mkdirSync(downloads, { recursive: true })
-    const ver = version.replace(/^v/i, '')
-    const packagePath = path.join(downloads, `随心起卦-更新-${ver}.exe`)
-    const launcherPath = path.join(downloads, `随心起卦-打开更新-${ver}.cmd`)
-    fs.copyFileSync(srcInstaller, packagePath)
-    // /S = 静默；先结束旧进程再装（与 installer.nsh 互补）
-    const exeName = '随心起卦.exe'
-    // 直接调用 exe /S（勿用 start，以免参数被吞）；仅静默更新，不进向导
-    const cmd = [
-      '@echo off',
-      'chcp 65001 >nul',
-      `title 随心起卦 更新 V${ver}`,
-      'echo 正在关闭旧版本并安装更新（不会打开完整安装向导）...',
-      `taskkill /F /IM "${exeName}" /T >nul 2>&1`,
-      'timeout /t 1 /nobreak >nul',
-      `"${packagePath}" /S`,
-      'if errorlevel 1 (',
-      '  echo 更新失败，请重试或从官网下载安装包。',
-      '  pause',
-      '  exit /b 1',
-      ')',
-      'echo 更新完成。',
-      '',
-    ].join('\r\n')
-    fs.writeFileSync(launcherPath, cmd, 'utf8')
-    downloadedInstallerPath = packagePath
-    updateLauncherPath = launcherPath
-    return { packagePath, launcherPath }
+    const child = spawn(installerPath, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.unref()
   } catch (e) {
     appendErrorLog(
-      `publishUserUpdatePackage: ${e instanceof Error ? e.message : String(e)}`,
+      `update:install spawn failed: ${e instanceof Error ? e.message : String(e)}`,
     )
-    return null
+    emit({
+      phase: 'error',
+      message: '无法启动更新安装，请重试或手动下载安装包',
+      version: status.version,
+    })
+    return
   }
+  // 稍等安装器起来再强退，避免托盘把进程挂住
+  setTimeout(() => {
+    try {
+      app.exit(0)
+    } catch {
+      process.exit(0)
+    }
+  }, 400)
 }
 
 export function setupAutoUpdater(opts: {
   getWindow: () => BrowserWindow | null
   onQuitForUpdate: () => void
+  prepareQuitForUpdate?: () => void
 }) {
   getMainWindow = opts.getWindow
   markQuitting = opts.onQuitForUpdate
+  prepareQuitForUpdate = opts.prepareQuitForUpdate ?? (() => undefined)
   if (wired) return
   wired = true
 
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowDowngrade = false
   autoUpdater.channel = 'latest'
+  autoUpdater.disableWebInstaller = true
   if (process.platform === 'win32') {
     const nsis = autoUpdater as unknown as {
       verifyUpdateCodeSignature?: (
@@ -147,7 +145,6 @@ export function setupAutoUpdater(opts: {
   autoUpdater.on('update-available', (info) => {
     const local = app.getVersion()
     const remote = info.version
-    // 防止 latest.yml 被旧版覆盖、或字符串误比（如 2.2.4 > 2.2.12）导致「降级更新」弹窗
     if (!isVersionNewer(remote, local)) {
       appendErrorLog(
         `autoUpdater: ignore non-newer remote=${remote} local=${local}`,
@@ -159,7 +156,7 @@ export function setupAutoUpdater(opts: {
       phase: 'available',
       version: remote,
       differential: true,
-      message: `可直达最新 V${remote}（当前 V${local}，中间版本可跳过）。将下载更新包，打开后仅更新程序。`,
+      message: `发现 V${remote}（当前 V${local}）。下载后点「安装并重启」即可，不会再复制整包到下载文件夹。`,
     })
   })
 
@@ -181,25 +178,18 @@ export function setupAutoUpdater(opts: {
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    const file =
-      (info as { downloadedFile?: string }).downloadedFile ||
-      downloadedInstallerPath ||
-      ''
-    if (file) downloadedInstallerPath = file
-    const published = publishUserUpdatePackage(
-      downloadedInstallerPath || file,
-      info.version,
-    )
+    const file = (info as { downloadedFile?: string }).downloadedFile || ''
+    if (file) cachedInstallerPath = file
+    const resolved = resolveInstallerPath()
+    if (resolved) cachedInstallerPath = resolved
     emit({
       phase: 'downloaded',
       version: info.version,
       percent: 100,
       differential: status.differential,
-      packagePath: published?.packagePath || downloadedInstallerPath || undefined,
-      launcherPath: published?.launcherPath || undefined,
-      message: published
-        ? `更新包已就绪。点「打开更新包」仅静默更新程序；也可运行下载文件夹中的「随心起卦-打开更新-${info.version.replace(/^v/i, '')}.cmd」。`
-        : '更新包已就绪。点「打开更新包」将静默更新程序（不进完整安装向导）。',
+      packagePath: cachedInstallerPath || undefined,
+      message:
+        '更新已就绪。点「安装并重启」将静默覆盖安装并自动打开，无需另下整包、也不进 Setup 向导。',
     })
   })
 
@@ -215,7 +205,7 @@ export async function checkForAppUpdate(): Promise<UpdateStatus> {
   if (!updaterEnabled()) {
     emit({
       phase: 'error',
-      message: '便携版 / 开发模式不支持应用内更新包，请下载完整安装包',
+      message: '便携版 / 开发模式不支持应用内更新，请下载完整安装包',
     })
     return status
   }
@@ -230,7 +220,7 @@ export async function checkForAppUpdate(): Promise<UpdateStatus> {
           phase: 'available',
           version: remote,
           differential: true,
-          message: `可直达最新 V${remote}（当前 V${local}）。下载更新包后打开，仅更新程序。`,
+          message: `发现 V${remote}（当前 V${local}）。下载后安装并重启即可。`,
         })
       }
     } else {
@@ -251,7 +241,7 @@ export async function checkForAppUpdate(): Promise<UpdateStatus> {
 }
 
 /**
- * 先尝试差量；失败则整包。下载的是更新包，安装时静默仅更新程序。
+ * 先尝试差量；失败则整包。只下载到 updater 缓存，不往「下载」再拷一份。
  */
 export async function downloadAppUpdate(): Promise<UpdateStatus> {
   if (!updaterEnabled()) {
@@ -270,8 +260,8 @@ export async function downloadAppUpdate(): Promise<UpdateStatus> {
       percent: 0,
       differential: !full,
       message: full
-        ? '差量不可用，正在下载完整更新包…'
-        : '正在下载更新包（优先差量）…',
+        ? '差量不可用，正在下载更新…'
+        : '正在下载更新（优先差量）…',
     })
     await autoUpdater.downloadUpdate()
   }
@@ -298,66 +288,24 @@ export async function downloadAppUpdate(): Promise<UpdateStatus> {
   }
 }
 
-/**
- * 打开更新包：退出本程序并以静默方式安装（仅更新，不进完整 Setup 向导）。
- */
+/** 安装并重启：静默覆盖，装完自动打开 */
 export function quitAndInstallUpdate(): void {
-  markQuitting()
-  // isSilent=true → 仅程序更新；isForceRunAfter=true → 装完自动打开
-  try {
-    autoUpdater.quitAndInstall(true, true)
-    return
-  } catch (e) {
-    appendErrorLog(
-      `quitAndInstall: ${e instanceof Error ? e.message : String(e)}`,
-    )
-  }
-  // 兜底：直接跑用户目录里的更新包 /S
-  const installer = downloadedInstallerPath
-  if (installer && fs.existsSync(installer)) {
-    runSilentInstaller(installer)
-    return
-  }
-  emit({
-    phase: 'error',
-    message: '未找到更新包，请重新下载',
-    version: status.version,
-  })
-}
-
-/** 退出应用后静默运行安装包（/S） */
-export function runSilentInstaller(installerPath: string): void {
-  markQuitting()
-  const exe = path.resolve(installerPath)
-  if (!fs.existsSync(exe)) {
-    emit({ phase: 'error', message: '更新包不存在', version: status.version })
-    return
-  }
-  try {
-    const child = spawn(exe, ['/S'], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    child.unref()
-  } catch (e) {
-    appendErrorLog(
-      `runSilentInstaller: ${e instanceof Error ? e.message : String(e)}`,
-    )
+  const installer = resolveInstallerPath()
+  if (!installer) {
     emit({
       phase: 'error',
-      message: e instanceof Error ? e.message : String(e),
+      message: '未找到已下载的更新，请重新下载',
       version: status.version,
     })
     return
   }
-  app.quit()
+  spawnSilentUpdateAndExit(installer)
 }
 
-/** 在资源管理器中显示更新启动器 / 更新包 */
+/** 兼容旧 preload：在资源管理器中定位缓存里的安装包（调试用） */
 export function revealUpdatePackage(): string | null {
-  const target = updateLauncherPath || downloadedInstallerPath
-  if (!target || !fs.existsSync(target)) return null
-  shell.showItemInFolder(target)
-  return target
+  const p = resolveInstallerPath()
+  if (!p) return null
+  shell.showItemInFolder(p)
+  return p
 }
