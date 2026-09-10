@@ -1,6 +1,6 @@
 {
   "name": "suixin-qigua",
-  "version": "2.2.4",
+  "version": "2.2.14",
   "description": "随心起卦 — Pip-Boy 风格桌面起卦",
   "author": "suixin-qigua",
   "main": "dist-electron/main.js",
@@ -40,11 +40,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "suixin-qigua-${version}-win-${arch}.${ext}"
@@ -56,10 +60,15 @@
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "随心起卦",
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "language": "2052",
       "runAfterFinish": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true,
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "suixin-qigua-${version}-win-portable.${ext}"
@@ -68,11 +77,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ],
       "category": "public.app-category.lifestyle",
@@ -83,10 +96,25 @@
     "dmg": {
       "title": "${productName} ${version}",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yuenchoryiu-cyber",
+        "repo": "suixin-qigua"
+      }
+    ]
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.22",
@@ -104,6 +132,7 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "leaflet": "^1.9.4"
   }
 }

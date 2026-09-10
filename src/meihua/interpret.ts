@@ -341,6 +341,116 @@ ${castFacts(cast)}
   return callLlmText(settings, messages)
 }
 
+export type IntentRefineOption = {
+  id: string
+  label: string
+  /** 写入所问的口语短语 */
+  phrase: string
+}
+
+export type IntentRefineRound = {
+  prompt: string
+  hint?: string
+  options: IntentRefineOption[]
+}
+
+/**
+ * 高精度：用 API 生成「挖真实所问」的选项题。
+ * refreshOnly=true 时表示用户点了「都不是」，只换一批更贴切的选项，不推进话题。
+ */
+export async function fetchIntentRefineRound(options: {
+  settings: AppSettings
+  categoryLabel: string
+  currentQuestion: string
+  priorPicks: { label: string; phrase: string }[]
+  refreshOnly?: boolean
+  forChase?: boolean
+}): Promise<IntentRefineRound> {
+  const {
+    settings,
+    categoryLabel,
+    currentQuestion,
+    priorPicks,
+    refreshOnly,
+    forChase,
+  } = options
+  if (!canUseLlm(settings)) {
+    throw new Error('高精度追问需要可用 API，请先在设置中配置并测试。')
+  }
+
+  const stage = forChase
+    ? '用户已看过卦解，还想把心里真正纠结的点挖清楚（解卦后追问）。'
+    : '起卦前：用选择题帮求签人说清心里真正想问的事，而不是套公式。'
+
+  const system = `你是「随心起卦」的问事助手。${stage}
+目标：找出求签人心里**真实想求**的那件事（动机、犹豫、时间点、对象关系），用口语短选项引导，像朋友在帮对方把话说清楚。
+硬性规则：
+1. 不要公式化模板（禁止「请选择A/B/C」「第一项第二项」这类官腔）。
+2. 选项要像真人会说的话，互相有区分，且贴近已有线索。
+3. 一次给 3～4 个选项；另由客户端加「都不是」。
+4. 只输出 JSON：{"prompt":"一句口语提问","hint":"可选短提示","options":[{"id":"a","label":"按钮短文案","phrase":"写入所问的短语"}]}
+5. label≤14字；phrase≤28字；prompt≤36字。`
+
+  const prior =
+    priorPicks.length > 0
+      ? priorPicks.map((p, i) => `${i + 1}. ${p.label}（${p.phrase}）`).join('\n')
+      : '（尚未选择）'
+
+  const user = refreshOnly
+    ? `类别：${categoryLabel}
+当前所问草稿：${currentQuestion || '（尚笼统）'}
+已选线索：
+${prior}
+用户觉得上一批选项都不贴切。请**换一批更贴近其真实心事**的选项，prompt 可略改但主题不变。不要重复旧选项措辞。`
+    : `类别：${categoryLabel}
+当前所问草稿：${currentQuestion || '（尚笼统）'}
+已选线索：
+${prior}
+请给出下一问，帮助把真实所问再挖深一点。若线索已够具体，仍给细一点的切口（时机/关系/行动犹豫）。`
+
+  const raw = await callLlmText(
+    settings,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    true,
+  )
+  return parseIntentRefine(raw)
+}
+
+function parseIntentRefine(content: string): IntentRefineRound {
+  const cleaned = content
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  let parsed: {
+    prompt?: string
+    hint?: string
+    options?: { id?: string; label?: string; phrase?: string }[]
+  }
+  try {
+    parsed = JSON.parse(cleaned) as typeof parsed
+  } catch {
+    const m = cleaned.match(/\{[\s\S]*\}/)
+    if (!m) throw new Error('高精度追问返回无法解析')
+    parsed = JSON.parse(m[0]) as typeof parsed
+  }
+  const options = (parsed.options || [])
+    .map((o, i) => ({
+      id: (o.id || `o${i + 1}`).slice(0, 24),
+      label: (o.label || '').trim().slice(0, 18),
+      phrase: (o.phrase || o.label || '').trim().slice(0, 40),
+    }))
+    .filter((o) => o.label)
+  if (options.length < 2) throw new Error('高精度追问选项不足，请重试')
+  return {
+    prompt: (parsed.prompt || '你真正想弄清的是哪一点？').trim().slice(0, 48),
+    hint: parsed.hint?.trim().slice(0, 60),
+    options: options.slice(0, 4),
+  }
+}
+
 function buildPrompt(ctx: {
   question: string
   categoryLabel: string
@@ -357,7 +467,7 @@ function buildPrompt(ctx: {
     `（起卦人未写文字，只在心里默念「${ctx.categoryLabel}」相关之事${ctx.subject ? `，对象：${ctx.subject}` : ''}${ctx.scope ? `，范围：${ctx.scope}` : ''}）`
 
   const followRule = ctx.highPrecision
-    ? `9. 高精度模式：额外给 2～3 条**短追问**（口语、具体、扣题），放入 JSON 字段 followUps 字符串数组，用来澄清心意以便二次精解。不要问姓名。`
+    ? `9. 高精度模式：额外给 2～3 条**口语短追问**（像在帮对方说出心里真正想求的事，勿公式化），放入 followUps；用于澄清心意以便二次精解。不要问姓名。`
     : `9. 普通模式：不要输出 followUps。`
 
   const system = `你是「随心起卦」的解卦助手。解答分两段：先文言断盘，再白话开解。

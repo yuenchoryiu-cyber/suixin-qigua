@@ -1,3 +1,5 @@
+import { paintShareDigitalRain } from './digitalRainBg'
+
 export type ShareTemplateId = 'classic' | 'compact' | 'poster' | 'oracle'
 
 export const SHARE_TEMPLATES: {
@@ -85,6 +87,7 @@ async function renderClassic(data: ShareCardData): Promise<string> {
   ctx.scale(scale, scale)
   ctx.fillStyle = '#071107'
   ctx.fillRect(0, 0, w, h)
+  paintShareDigitalRain(ctx, w, h)
   ctx.strokeStyle = '#1a7a12'
   ctx.lineWidth = 3
   ctx.strokeRect(12, 12, w - 24, h - 24)
@@ -183,6 +186,7 @@ async function renderCompact(data: ShareCardData): Promise<string> {
   ctx.scale(scale, scale)
   ctx.fillStyle = '#0a120a'
   ctx.fillRect(0, 0, w, h)
+  paintShareDigitalRain(ctx, w, h)
   ctx.fillStyle = '#1a7a12'
   ctx.fillRect(0, 0, 8, h)
 
@@ -241,6 +245,7 @@ async function renderPoster(data: ShareCardData): Promise<string> {
   g.addColorStop(1, '#061006')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, w, h)
+  paintShareDigitalRain(ctx, w, h)
 
   ctx.fillStyle = '#1a7a12'
   ctx.fillRect(0, 0, w, 6)
@@ -317,6 +322,7 @@ async function renderOracle(data: ShareCardData): Promise<string> {
   ctx.scale(scale, scale)
   ctx.fillStyle = '#061006'
   ctx.fillRect(0, 0, w, h)
+  paintShareDigitalRain(ctx, w, h)
   ctx.strokeStyle = '#1a7a12'
   ctx.lineWidth = 2
   ctx.strokeRect(18, 18, w - 36, h - 36)

@@ -29,9 +29,11 @@ import {
   chatFollowUp,
   interpretCast,
   canUseLlm,
+  fetchIntentRefineRound,
   refineWithAnswers,
   testApiConnection,
   type ChatTurn,
+  type IntentRefineOption,
 } from './meihua/interpret'
 import { CLARIFY_CUSTOM_HINTS } from './clarify/hints'
 import { BOUNDARY_BANNER } from './shared/privacy'
@@ -42,6 +44,8 @@ import {
   APP_VERSION,
   pickRandomYijingQuote,
 } from './shared/yijingQuotes'
+import { checkForUpdate, type UpdateInfo } from './shared/updateCheck'
+import type { UpdateStatus } from './shared/updateTypes'
 import startEmblem from './assets/start-emblem.png'
 import {
   SHARE_TEMPLATES,
@@ -86,11 +90,15 @@ type Page =
   | 'clarify'
   | 'confirm'
   | 'cast'
+  | 'hp-refine'
   | 'hold'
   | 'anim'
   | 'reveal'
   | 'result'
   | 'settings'
+
+const HP_NONE_LIMIT = 5
+const HP_MAX_PICKS = 3
 
 function AlertBanner({
   message,
@@ -137,6 +145,9 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [showWelcome, setShowWelcome] = useState(false)
   const [welcomeDontShow, setWelcomeDontShow] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [category, setCategory] = useState<CategoryId>('self')
   const [school, setSchool] = useState<DivinationSchool>('meihua')
@@ -180,6 +191,16 @@ export default function App() {
   const [chaseAnswers, setChaseAnswers] = useState<ClarifyAnswer[]>([])
   const [chaseNodeId, setChaseNodeId] = useState('')
   const [chaseDone, setChaseDone] = useState(false)
+  /** 高精度 API 挖真实所问 */
+  const [hpRefineDone, setHpRefineDone] = useState(false)
+  const [hpNoneStreak, setHpNoneStreak] = useState(0)
+  const [hpPrompt, setHpPrompt] = useState('')
+  const [hpHint, setHpHint] = useState('')
+  const [hpOptions, setHpOptions] = useState<IntentRefineOption[]>([])
+  const [hpPicks, setHpPicks] = useState<{ label: string; phrase: string }[]>([])
+  const [chaseNoneStreak, setChaseNoneStreak] = useState(0)
+  const [chaseApiOptions, setChaseApiOptions] = useState<IntentRefineOption[] | null>(null)
+  const [chaseApiPrompt, setChaseApiPrompt] = useState('')
   const [shareTemplate, setShareTemplate] = useState<ShareTemplateId>('classic')
   const [sharePreview, setSharePreview] = useState<string | null>(null)
   const [dailyMode, setDailyMode] = useState(false)
@@ -266,6 +287,38 @@ export default function App() {
     })
     return () => {
       off()
+    }
+  }, [])
+
+  // 启动更新：优先 electron-updater（差量）；失败再走 GitHub 整包兜底
+  useEffect(() => {
+    if (!window.suixin) return
+    const off = window.suixin.onUpdateStatus?.((s) => {
+      setUpdateStatus(s)
+      if (s.phase === 'available' || s.phase === 'downloading' || s.phase === 'downloaded') {
+        setUpdateInfo(null)
+      }
+    })
+    let cancelled = false
+    void (async () => {
+      const enabled = await window.suixin.updateEnabled?.()
+      if (cancelled) return
+      if (enabled) {
+        // main 已延迟 check；这里再拉一次状态即可
+        const s = await window.suixin.getUpdateStatus?.()
+        if (!cancelled && s) setUpdateStatus(s)
+        return
+      }
+      // 便携 / 开发：整包探测兜底
+      const platform =
+        (await window.suixin.getPlatform?.()) ||
+        (navigator.userAgent.includes('Mac') ? 'darwin' : 'win32')
+      const info = await checkForUpdate(platform)
+      if (!cancelled && info) setUpdateInfo(info)
+    })()
+    return () => {
+      cancelled = true
+      off?.()
     }
   }, [])
 
@@ -433,6 +486,15 @@ export default function App() {
     setChaseAnswers([])
     setChaseNodeId('')
     setChaseDone(false)
+    setChaseNoneStreak(0)
+    setChaseApiOptions(null)
+    setChaseApiPrompt('')
+    setHpRefineDone(false)
+    setHpNoneStreak(0)
+    setHpPrompt('')
+    setHpHint('')
+    setHpOptions([])
+    setHpPicks([])
     setSharePreview(null)
     setDailyMode(false)
     autoRevealRef.current = false
@@ -628,7 +690,115 @@ export default function App() {
       void executeCast(0)
       return
     }
+    if (highPrecision && canUseLlm(settings) && !hpRefineDone) {
+      setPage('hp-refine')
+      void loadHpRound(false)
+      return
+    }
     setPage('hold')
+  }
+
+  function composeHpQuestion(): string {
+    const base = question.trim()
+    const extra = hpPicks.map((p) => p.phrase).filter(Boolean)
+    if (!extra.length) return base
+    if (!base) return `关于「${catMeta.label}」：${extra.join('，')}。请据此指点。`
+    return `${base}${base.endsWith('。') || base.endsWith('？') ? '' : '。'}补充：${extra.join('，')}。`
+  }
+
+  async function loadHpRound(refreshOnly: boolean) {
+    setBusy(true)
+    setError('')
+    try {
+      const round = await fetchIntentRefineRound({
+        settings,
+        categoryLabel: catMeta.label,
+        currentQuestion: composeHpQuestion() || question.trim(),
+        priorPicks: hpPicks,
+        refreshOnly,
+        forChase: false,
+      })
+      setHpPrompt(round.prompt)
+      setHpHint(round.hint || '')
+      setHpOptions(round.options)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      // API 失败时允许直接起卦，避免卡死
+      setHpRefineDone(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function proceedHpToHold() {
+    const q = composeHpQuestion()
+    if (q) setQuestion(q)
+    setHpRefineDone(true)
+    setError('')
+    if (settings.castReplayMode) void executeCast(0)
+    else setPage('hold')
+  }
+
+  function pickHpOption(optionId: string) {
+    if (busy) return
+    if (optionId === NONE_OPTION_ID) {
+      const streak = hpNoneStreak + 1
+      setHpNoneStreak(streak)
+      if (streak < HP_NONE_LIMIT) {
+        void loadHpRound(true)
+      }
+      // streak>=5：停住，展示「按现有资料起卦」
+      return
+    }
+    const opt = hpOptions.find((o) => o.id === optionId)
+    if (!opt) return
+    const nextPicks = [...hpPicks, { label: opt.label, phrase: opt.phrase || opt.label }]
+    setHpPicks(nextPicks)
+    setHpNoneStreak(0)
+    if (nextPicks.length >= HP_MAX_PICKS) {
+      const base = question.trim()
+      const extra = nextPicks.map((p) => p.phrase).filter(Boolean)
+      const q = !extra.length
+        ? base
+        : !base
+          ? `关于「${catMeta.label}」：${extra.join('，')}。请据此指点。`
+          : `${base}${base.endsWith('。') || base.endsWith('？') ? '' : '。'}补充：${extra.join('，')}。`
+      if (q) setQuestion(q)
+      setHpRefineDone(true)
+      if (settings.castReplayMode) void executeCast(0)
+      else setPage('hold')
+      return
+    }
+    // 用 nextPicks 拉下一轮（state 尚未刷完，显式传入）
+    void (async () => {
+      setBusy(true)
+      setError('')
+      try {
+        const round = await fetchIntentRefineRound({
+          settings,
+          categoryLabel: catMeta.label,
+          currentQuestion:
+            (() => {
+              const base = question.trim()
+              const extra = nextPicks.map((p) => p.phrase).filter(Boolean)
+              if (!extra.length) return base
+              if (!base) return `关于「${catMeta.label}」：${extra.join('，')}。请据此指点。`
+              return `${base}${base.endsWith('。') || base.endsWith('？') ? '' : '。'}补充：${extra.join('，')}。`
+            })() || question.trim(),
+          priorPicks: nextPicks,
+          refreshOnly: false,
+        })
+        setHpPrompt(round.prompt)
+        setHpHint(round.hint || '')
+        setHpOptions(round.options)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+        setHpRefineDone(true)
+        setPage('hold')
+      } finally {
+        setBusy(false)
+      }
+    })()
   }
 
   async function executeCast(holdMs: number) {
@@ -826,7 +996,27 @@ export default function App() {
       setChaseAnswers([])
       setChaseNodeId(followFirstId(category))
       setChaseDone(false)
+      setChaseNoneStreak(0)
+      setChaseApiOptions(null)
+      setChaseApiPrompt('')
       setSharePreview(null)
+      if (highPrecision && canUseLlm(settings)) {
+        void (async () => {
+          try {
+            const round = await fetchIntentRefineRound({
+              settings,
+              categoryLabel: catMeta.label,
+              currentQuestion: question.trim(),
+              priorPicks: [],
+              forChase: true,
+            })
+            setChaseApiPrompt(round.prompt)
+            setChaseApiOptions(round.options)
+          } catch {
+            /* 回退静态追问树 */
+          }
+        })()
+      }
       setInterpret(null)
       setPage('reveal')
     } catch (e) {
@@ -1047,22 +1237,92 @@ export default function App() {
   }
 
   async function pickChaseOption(optionId: string) {
-    if (!cast || !interpret || !chaseNode || busy || chaseDone) return
+    if (!cast || !interpret || busy || chaseDone) return
+    const usingApiOpts = highPrecision && canUseLlm(settings) && chaseApiOptions
+    const node = chaseNode
+    if (!usingApiOpts && !node) return
+
     if (optionId === NONE_OPTION_ID) {
+      if (highPrecision && canUseLlm(settings)) {
+        const streak = chaseNoneStreak + 1
+        setChaseNoneStreak(streak)
+        if (streak >= HP_NONE_LIMIT) {
+          // 超过 5 次：停住，UI 提供跳过
+          return
+        }
+        setBusy(true)
+        setError('')
+        try {
+          const round = await fetchIntentRefineRound({
+            settings,
+            categoryLabel: catMeta.label,
+            currentQuestion: question.trim(),
+            priorPicks: chaseAnswers.map((a) => ({
+              label: a.label,
+              phrase: a.phrase,
+            })),
+            refreshOnly: true,
+            forChase: true,
+          })
+          setChaseApiPrompt(round.prompt)
+          setChaseApiOptions(round.options)
+          setChaseCustomMode(false)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          setChaseCustomMode(true)
+        } finally {
+          setBusy(false)
+        }
+        return
+      }
       setChaseCustomMode(true)
       return
     }
-    const opt = chaseNode.options.find((o) => o.id === optionId)
+
+    if (usingApiOpts) {
+      const opt = chaseApiOptions.find((o) => o.id === optionId)
+      if (!opt) return
+      setChaseNoneStreak(0)
+      await runChaseMessage(
+        `基于刚才的卦解，继续追问（仅此一问）：${opt.phrase || opt.label}。请结合原盘简短作答，勿鼓励继续细问。`,
+      )
+      return
+    }
+
+    if (!node) return
+    const opt = node.options.find((o) => o.id === optionId)
     if (!opt) return
+    setChaseNoneStreak(0)
     const { answers, done } = pickFollowOption(
       category,
-      chaseNode.id,
+      node.id,
       opt,
       chaseAnswers,
     )
     setChaseAnswers(answers)
     if (!done) return
     await runChaseMessage(composeFollowUp(catMeta.label, answers))
+  }
+
+  async function ensureChaseApiBoot() {
+    if (!highPrecision || !canUseLlm(settings) || chaseApiOptions || chaseDone || busy) return
+    setBusy(true)
+    try {
+      const round = await fetchIntentRefineRound({
+        settings,
+        categoryLabel: catMeta.label,
+        currentQuestion: question.trim(),
+        priorPicks: [],
+        refreshOnly: false,
+        forChase: true,
+      })
+      setChaseApiPrompt(round.prompt)
+      setChaseApiOptions(round.options)
+    } catch {
+      setChaseApiOptions(null)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function submitChaseCustom() {
@@ -1767,11 +2027,17 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={highPrecision}
-                    disabled={!settings.apiKey?.trim()}
-                    onChange={(e) => setHighPrecision(e.target.checked)}
+                    disabled={!canUseLlm(settings)}
+                    onChange={(e) => {
+                      setHighPrecision(e.target.checked)
+                      setHpRefineDone(false)
+                      setHpNoneStreak(0)
+                      setHpPicks([])
+                      setHpOptions([])
+                    }}
                   />{' '}
                   高精度追问
-                  {!settings.apiKey?.trim() ? '（需 API）' : ''}
+                  {!canUseLlm(settings) ? '（需 API）' : ' · 起卦前用 API 挖清真实所问'}
                 </label>
               </div>
 
@@ -1801,6 +2067,78 @@ export default function App() {
                 }}
               >
                 返回确认所问
+              </button>
+            </>
+          )}
+
+          {page === 'hp-refine' && (
+            <>
+              <div className="h1">高精度 · 挖清所问</div>
+              <p className="sub">
+                通过 API 用口语选项帮你说出心里真正想求的事；选「都不是」只会换一批选项。
+              </p>
+              {error && (
+                <AlertBanner message={error} onDismiss={() => setError('')} />
+              )}
+              {hpPicks.length > 0 && (
+                <div className="chip-trail">
+                  {hpPicks.map((p, i) => (
+                    <span key={`${p.label}-${i}`} className="chip trail">
+                      {p.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="h1" style={{ fontSize: 15, marginTop: 10 }}>
+                {busy && !hpPrompt ? '正在想更贴切的问法…' : hpPrompt || '你真正想弄清的是？'}
+              </div>
+              {hpHint && <p className="sub">{hpHint}</p>}
+              {hpNoneStreak > 0 && (
+                <p className="sub">
+                  已连续「都不是」{hpNoneStreak}/{HP_NONE_LIMIT}
+                  {hpNoneStreak >= HP_NONE_LIMIT
+                    ? ' · 可按现有资料起卦'
+                    : ' · 仅更换选项，不推进'}
+                </p>
+              )}
+              <div className="option-stack">
+                {optionsWithNone(hpOptions.map((o) => ({
+                  id: o.id,
+                  label: o.label,
+                  phrase: o.phrase,
+                }))).map((o) => (
+                  <button
+                    key={o.id}
+                    className="btn block option-btn"
+                    disabled={busy || (o.id === NONE_OPTION_ID && hpNoneStreak >= HP_NONE_LIMIT)}
+                    onClick={() => pickHpOption(o.id)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {(hpNoneStreak >= HP_NONE_LIMIT ||
+                hpPicks.length > 0 ||
+                !!question.trim() ||
+                !!error ||
+                hpRefineDone) && (
+                <button
+                  className="btn block"
+                  disabled={busy}
+                  onClick={() => proceedHpToHold()}
+                >
+                  按现有资料起卦
+                </button>
+              )}
+              <button
+                className="btn ghost block"
+                disabled={busy}
+                onClick={() => {
+                  setError('')
+                  setPage('cast')
+                }}
+              >
+                返回
               </button>
             </>
           )}
@@ -2117,24 +2455,71 @@ export default function App() {
                         </p>
                       )}
 
-                      {!chaseDone && chaseNode && !chaseCustomMode && (
+                      {!chaseDone &&
+                        !chaseCustomMode &&
+                        (chaseApiOptions || chaseNode) && (
                         <>
-                          {chaseNode.hint && <p className="sub">{chaseNode.hint}</p>}
+                          {highPrecision && canUseLlm(settings) && !chaseApiOptions && (
+                            <button
+                              className="btn ghost block"
+                              disabled={busy}
+                              onClick={() => void ensureChaseApiBoot()}
+                            >
+                              {busy ? '…' : '用 API 生成更贴切的追问选项'}
+                            </button>
+                          )}
                           <div className="h1" style={{ fontSize: 'var(--fs-body)', marginTop: 8 }}>
-                            {chaseNode.prompt}
+                            {chaseApiPrompt || chaseNode?.prompt}
                           </div>
+                          {chaseNode?.hint && !chaseApiOptions && (
+                            <p className="sub">{chaseNode.hint}</p>
+                          )}
+                          {highPrecision && canUseLlm(settings) && chaseNoneStreak > 0 && (
+                            <p className="sub">
+                              已连续「都不是」{chaseNoneStreak}/{HP_NONE_LIMIT}
+                              {chaseNoneStreak >= HP_NONE_LIMIT
+                                ? ' · 可跳过，保留现解'
+                                : ' · 仅更换选项'}
+                            </p>
+                          )}
                           <div className="grid-cats">
-                            {optionsWithNone(chaseNode.options).map((o) => (
+                            {optionsWithNone(
+                              (chaseApiOptions || chaseNode!.options).map((o) => ({
+                                id: o.id,
+                                label: o.label,
+                                phrase: 'phrase' in o ? (o as IntentRefineOption).phrase : (o as { phrase?: string }).phrase || '',
+                              })),
+                            ).map((o) => (
                               <button
                                 key={o.id}
                                 className="cat"
-                                disabled={busy}
+                                disabled={
+                                  busy ||
+                                  (o.id === NONE_OPTION_ID &&
+                                    highPrecision &&
+                                    canUseLlm(settings) &&
+                                    chaseNoneStreak >= HP_NONE_LIMIT)
+                                }
                                 onClick={() => void pickChaseOption(o.id)}
                               >
                                 <div className="label">{o.label}</div>
                               </button>
                             ))}
                           </div>
+                          {highPrecision &&
+                            canUseLlm(settings) &&
+                            chaseNoneStreak >= HP_NONE_LIMIT && (
+                              <button
+                                className="btn block"
+                                disabled={busy}
+                                onClick={() => {
+                                  setChaseDone(true)
+                                  setChaseCustomMode(false)
+                                }}
+                              >
+                                按现有解读继续（跳过追问）
+                              </button>
+                            )}
                         </>
                       )}
 
@@ -2586,6 +2971,171 @@ export default function App() {
             </button>
             <button className="btn ghost block" onClick={() => void dismissWelcome(false)}>
               先逛逛
+            </button>
+          </div>
+        </div>
+      )}
+
+      {updateStatus &&
+        (updateStatus.phase === 'available' ||
+          updateStatus.phase === 'downloading' ||
+          updateStatus.phase === 'downloaded' ||
+          updateStatus.phase === 'error') && (
+        <div className="welcome-mask update-mask" role="dialog" aria-modal="true">
+          <div className="welcome-card update-card">
+            <div className="h1">
+              {updateStatus.phase === 'downloaded'
+                ? '更新已就绪'
+                : updateStatus.phase === 'downloading'
+                  ? '正在下载更新'
+                  : updateStatus.phase === 'error'
+                    ? '更新遇到问题'
+                    : '发现新版本'}
+            </div>
+            <p className="sub">
+              当前 V{APP_VERSION}
+              {updateStatus.version ? ` → 最新 V${updateStatus.version}` : ''}
+            </p>
+            {updateStatus.phase === 'available' && (
+              <p className="update-hint">
+                {updateStatus.message ||
+                  '将下载更新包到本机；打开更新包只会静默更新程序，不会进完整安装向导。中间版本可跳过。'}
+              </p>
+            )}
+            {updateStatus.phase === 'downloading' && updateStatus.message && (
+              <p className="update-hint">{updateStatus.message}</p>
+            )}
+            {updateStatus.phase === 'downloading' && (
+              <div className="update-progress">
+                <div
+                  className="update-progress-bar"
+                  style={{ width: `${Math.min(100, Math.max(0, updateStatus.percent ?? 0))}%` }}
+                />
+                <div className="update-progress-text">
+                  {(updateStatus.percent ?? 0).toFixed(0)}%
+                  {updateStatus.total
+                    ? ` · ${Math.round((updateStatus.transferred ?? 0) / 1048576)}/${Math.round(updateStatus.total / 1048576)} MB`
+                    : ''}
+                </div>
+              </div>
+            )}
+            {updateStatus.phase === 'downloaded' && (
+              <p className="update-hint">
+                {updateStatus.message ||
+                  '更新包已下载。点「打开更新包」将退出并仅更新程序（静默，无 Setup 向导）。'}
+              </p>
+            )}
+            {updateStatus.phase === 'error' && (
+              <p className="update-hint">{updateStatus.message || '请稍后重试，或改用完整安装包。'}</p>
+            )}
+            {updateStatus.phase === 'available' && (
+              <button
+                className="btn block"
+                type="button"
+                disabled={updateBusy}
+                onClick={() => {
+                  setUpdateBusy(true)
+                  void window.suixin
+                    ?.downloadUpdate?.()
+                    .finally(() => setUpdateBusy(false))
+                }}
+              >
+                下载更新包
+              </button>
+            )}
+            {updateStatus.phase === 'downloaded' && (
+              <>
+                <button
+                  className="btn block"
+                  type="button"
+                  onClick={() => {
+                    void window.suixin?.installUpdate?.()
+                  }}
+                >
+                  打开更新包（仅更新程序）
+                </button>
+                <button
+                  className="btn ghost block"
+                  type="button"
+                  onClick={() => {
+                    void window.suixin?.revealUpdate?.()
+                  }}
+                >
+                  在文件夹中显示更新包
+                </button>
+              </>
+            )}
+            {updateStatus.phase === 'error' && (
+              <button
+                className="btn block"
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const platform =
+                      (await window.suixin?.getPlatform?.()) || 'win32'
+                    const info = await checkForUpdate(platform)
+                    if (info) {
+                      setUpdateInfo(info)
+                      setUpdateStatus(null)
+                    }
+                  })()
+                }}
+              >
+                改用完整安装包
+              </button>
+            )}
+            {updateStatus.phase !== 'downloading' && (
+              <button
+                className="btn ghost block"
+                type="button"
+                onClick={() => setUpdateStatus(null)}
+              >
+                稍后再说
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {updateInfo && (
+        <div className="welcome-mask update-mask" role="dialog" aria-modal="true">
+          <div className="welcome-card update-card">
+            <div className="h1">发现新版本</div>
+            <p className="sub">
+              当前 V{APP_VERSION} → 最新 V{updateInfo.version}
+            </p>
+            <p className="update-hint">
+              建议使用安装版的「下载更新包 → 打开更新包」流程（仅静默更新）。
+              若只能下完整 exe：安装程序会先结束旧进程再覆盖。
+              {updateInfo.assetName ? ` 文件：${updateInfo.assetName}` : ''}
+            </p>
+            <button
+              className="btn block"
+              type="button"
+              onClick={() => {
+                void (async () => {
+                  await window.suixin?.openExternal?.(updateInfo.downloadUrl)
+                  await window.suixin?.quitApp?.()
+                })()
+              }}
+            >
+              下载完整包并退出
+            </button>
+            <button
+              className="btn ghost block"
+              type="button"
+              onClick={() => {
+                void window.suixin?.openExternal?.(updateInfo.releaseUrl)
+              }}
+            >
+              查看发布说明
+            </button>
+            <button
+              className="btn ghost block"
+              type="button"
+              onClick={() => setUpdateInfo(null)}
+            >
+              稍后再说
             </button>
           </div>
         </div>

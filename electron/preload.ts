@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppSettings, HistoryEntry } from '../src/shared/types'
+import type { UpdateStatus } from '../src/shared/updateTypes'
 
 const api = {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
@@ -15,6 +16,23 @@ const api = {
   copyShareImage: (dataUrl: string) => ipcRenderer.invoke('share:clipboard', dataUrl),
   logError: (message: string): Promise<boolean> =>
     ipcRenderer.invoke('log:error', message),
+  getPlatform: (): Promise<string> => ipcRenderer.invoke('app:platform'),
+  openExternal: (url: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('shell:openExternal', url),
+  updateEnabled: (): Promise<boolean> => ipcRenderer.invoke('update:enabled'),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:status'),
+  checkUpdate: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:check'),
+  downloadUpdate: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:download'),
+  installUpdate: (): Promise<boolean> => ipcRenderer.invoke('update:install'),
+  revealUpdate: (): Promise<{ ok: true; path: string } | { ok: false }> =>
+    ipcRenderer.invoke('update:reveal'),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => {
+    const listener = (_: unknown, status: UpdateStatus) => cb(status)
+    ipcRenderer.on('update:status', listener)
+    return () => {
+      ipcRenderer.removeListener('update:status', listener)
+    }
+  },
   clearStore: (
     resetSettings?: boolean,
   ): Promise<{ settings: AppSettings; history: HistoryEntry[] }> =>

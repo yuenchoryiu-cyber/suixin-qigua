@@ -23,6 +23,15 @@ import {
   type PersistData,
 } from './store'
 import type { AppSettings, HistoryEntry } from '../src/shared/types'
+import {
+  checkForAppUpdate,
+  downloadAppUpdate,
+  getUpdateStatus,
+  quitAndInstallUpdate,
+  revealUpdatePackage,
+  setupAutoUpdater,
+  updaterEnabled,
+} from './updater'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -285,6 +294,28 @@ function registerIpc() {
     return true
   })
 
+  ipcMain.handle('app:platform', () => process.platform)
+
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    const u = String(url || '').trim()
+    if (!/^https?:\/\//i.test(u)) return { ok: false as const, error: 'invalid url' }
+    await shell.openExternal(u)
+    return { ok: true as const }
+  })
+
+  ipcMain.handle('update:enabled', () => updaterEnabled())
+  ipcMain.handle('update:status', () => getUpdateStatus())
+  ipcMain.handle('update:check', () => checkForAppUpdate())
+  ipcMain.handle('update:download', () => downloadAppUpdate())
+  ipcMain.handle('update:install', () => {
+    quitAndInstallUpdate()
+    return true
+  })
+  ipcMain.handle('update:reveal', () => {
+    const p = revealUpdatePackage()
+    return p ? { ok: true as const, path: p } : { ok: false as const }
+  })
+
   ipcMain.handle('store:clear', (_e, resetSettings: boolean) => {
     // resetSettings=true → 全量重置；false → 只清历史
     data = clearStore(!resetSettings)
@@ -320,8 +351,20 @@ if (!gotLock) {
     createWindow()
     createTray()
     registerIpc()
+    setupAutoUpdater({
+      getWindow: () => mainWindow,
+      onQuitForUpdate: () => {
+        quitting = true
+      },
+    })
     // 从桌面捷径启动时直接弹出面板
     showWindow()
+    // 启动后快速探测更新（仅安装包）
+    if (updaterEnabled()) {
+      setTimeout(() => {
+        void checkForAppUpdate()
+      }, 1500)
+    }
   })
 
   app.on('before-quit', () => {

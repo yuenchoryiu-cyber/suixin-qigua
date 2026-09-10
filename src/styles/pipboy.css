@@ -1818,6 +1818,42 @@ select {
   cursor: pointer;
 }
 
+.update-mask {
+  z-index: 30;
+}
+.update-card .update-hint {
+  margin: 8px 0 14px;
+  font-size: var(--fs-caption);
+  color: var(--pb-amber);
+  word-break: break-all;
+}
+.update-card .btn + .btn {
+  margin-top: 8px;
+}
+.update-progress {
+  margin: 10px 0 14px;
+  border: 1px solid var(--pb-green-dim);
+  background: rgba(0, 0, 0, 0.35);
+  height: 18px;
+  position: relative;
+  overflow: hidden;
+}
+.update-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #1a6b14, var(--pb-green));
+  transition: width 0.2s ease;
+}
+.update-progress-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-caption);
+  color: var(--pb-amber);
+  text-shadow: 0 0 4px #000;
+}
+
 .footer-bar {
   position: relative;
   z-index: 3;
